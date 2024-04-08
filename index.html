@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script type="module">
+      //import {joinRoom} from './trystero-torrent.min.js'
+    </script>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src * self blob: data: gap:; style-src * self 'unsafe-inline' blob: data: gap:; script-src * 'self' 'unsafe-eval' 'unsafe-inline' blob: data: gap:; object-src * 'self' blob: data: gap:; img-src * self 'unsafe-inline' blob: data: gap:; connect-src self * 'unsafe-inline' blob: data: gap:; frame-src * self blob: data: gap:;">
+    <!-- https://developer.mozilla.org/en-US/docs/Web/HTTP/CSP -->
+    <!--<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'">-->
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+</head>
+
+    <link href="./styles.css" rel="stylesheet">
+    <title>TestChatApp!</title>
+  </head>
+  <body>
+    <p id="ErrorText"></p>
+    <div id="username"></div>
+
+    <div id="chats">
+      <button id="DMsButton" disabled>DMs</button><button id="plus" disabled>+</button>
+    </div>
+    <div id="peerServer">
+      <h3>Before anything, join or create a peerserver:</h3>
+      This server is used to find other people and stablish connections, all the server can see are connections and disconnections, the data sent between users is all private.
+      This part is optional and can be skipped, but note that the default peerServer is known for having problems when clossing connections.
+      <form id="createServerForm">
+        Server:<br /><input id="createServerName" placeholder="Server1"></input><br />
+        IP (only if joining another):<br /><input id="createServerIP" placeholder="Server1"></input><br />
+        Port:<br /><input id="createServerport" placeholder="Server1"></input><br />
+        <br />
+        <button type="submit" id="defaultPeerServerButton">Skip</button>
+        <button type="submit" id="createPeerServerButton">Create</button>
+        <button type="submit" id="joinPeerServerButton">Join</button>
+      </form>
+
+    </div>
+    <div id="start">
+      <h3>First create a user:</h3>
+       
+        <form id="createUserForm">
+          Username:<br /><input id="createUserName" placeholder="Me"></input>
+          <br />
+          <!--Password*:<br /><input id="createUserPass" placeholder="Me"></input>
+          <br />-->
+          <button type="submit" id="createUserButton">Create</button>
+          <!--*The Password is used to recognize users in chats accross different devices and instances, it is not stored anywhere and its used to
+          generate public keys that can be used to validate the user.-->
+        </form>
+
+    </div>
+    <div id="DMs">
+      <h3>You</h3>
+      <p>In this area you can send DMs to other users or invite them to your chat. You will also receive DMs and invites here.<br />
+      COMMANDS:<br />
+      /dm [username], [message]<br />
+      /invite [username], [name of the chat]<br />
+      </p>
+
+        <ul class="Content" id="dms"></ul>
+      <div class="messageSender">
+        <form id="dmForm">
+        <input id="dmMessageInput" placeholder="Enter your message..." autocomplete="off" required /><button type="submit" id="dmButton">Send</button>
+        </form>
+      </div>
+    </div>
+    <div id="chatCreation">
+      <h3>Create a chat:</h3>
+        <form id="ccForm">
+          Chat name:<br /><input id="createChatName" placeholder="MyChat"></input>
+          <br />
+          Chat password:<br /><input id="createChatPass" placeholder="MyPass"></input>
+          <br />
+          <button type="submit" id="createChatButton">Create</button>
+        </form>
+      <h3>Or join one:</h3>
+        <form id="jcForm">
+          Chat name:<br /><input id="joinChatName" placeholder="chatName"></input>
+          <br />
+          Chat password:<br /><input id="joinChatPass" placeholder="MyPass"></input>
+          <br />
+          <button type="submit" id="joinChatButton">join</button>
+        </form>
+    </div>
+    
+    <div id="chat">
+      <h3 id="chatName">Chat name</h3>
+      <div id="container">
+        <ul class="Content" id="chatBox"></ul>
+        <div id="left" class="messageSender">
+          
+          <button onclick="switchFileForm()">+</button>
+          <form id="chatForm">
+
+
+            <input id="chatMessageInput" placeholder="Enter your message..." autocomplete="off" required /><button type="submit" id="chatSendMessageButton">Send</button>
+          </form>
+          
+            
+          <div class="form-popup" id="fileUploadForm">
+            <form class="form-container">
+              <label for="file"><b>Upload file</b></label>
+              <input type="file" name="file" id="fileToShare" required multiple >
+          
+              <button type="submit" class="btn">Share</button>
+            </form>
+            <button onclick="switchFileForm()">-</button>
+          </div>
+          
+          <script>
+          function switchFileForm() {
+            if(document.getElementById("fileUploadForm").style.display==="block"){
+              document.getElementById("fileUploadForm").style.display = "none";
+            }else 
+              document.getElementById("fileUploadForm").style.display = "block";
+          }
+          
+          </script>
+        </div>
+        <div id="splitter"></div>
+        <div id="right">
+          <button id="chatTree"><img class = "icon" src="./img/tree.png"></button>
+          <button id="chatUsers"><img class = "icon" src="./img/user.png"></button>
+          <button id="chatForceUpdate"><img class = "icon" src="./img/reload.png"></button>
+          <button id="chatConHandler"><img class = "icon" src="./img/conHandler.png"></button>
+          <div id="dataDisplayArea"></div>
+        </div>
+    </div>
+    
+     
+
+
+    </div>
+    <!--
+    We are using Node.js <span id="node-version"></span>,<br />
+    Chromium <span id="chrome-version"></span>,<br />
+    and Electron <span id="electron-version"></span>.
+    -->
+    <br /><br /><br />
+
+
+    <!-- You can also require other files to run in this process -->
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>
