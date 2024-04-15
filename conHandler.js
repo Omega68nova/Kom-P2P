@@ -36,15 +36,15 @@ class Queue {
   }
 }
 
-const PEERJS_OPTIONS = 
-  { 
+const PEERJS_OPTIONS = {}
+ /* { 
 		//'host': "127.0.0.1",
 		//'port': 9000,
 	//	'path': "/myapp",
   //'secure':true,
     'iceServers': [
       { 'urls': 'stun:stun.l.google.com:19302' },
-      /*{
+      {
         'urls': "turn:omegachatapp.metered.live:80",
         'username': "371bec6b38c070c460b0046f",
         'credential': "0WiOAZKfxs9jqcLT",
@@ -63,11 +63,11 @@ const PEERJS_OPTIONS =
         'urls': "turn:omegachatapp.metered.live:443?transport=tcp",
         'username': "371bec6b38c070c460b0046f",
         'credential': "0WiOAZKfxs9jqcLT",
-      }*/
+      }
     ], 
     'sdpSemantics': 'unified-plan' 
-  };
-const CON_OPTIONS = {"serialization":"json","reliable":true};
+  };*/
+const CON_OPTIONS = {"serialization":"json",'ordered': true,"reliable":true};
 
 class ConData{
   //Type: "Normal" | "Special"
@@ -85,6 +85,7 @@ class ConData{
         this.id = id;
         this.type = type;
         this.state = state;
+        this.lastContactDate= Date.now();
         this.dataBacklog =new Queue();
         this.funcStorage = {
           onMessage: function onMessage(id,data){
@@ -111,27 +112,22 @@ class ConData{
         this.connection.send(data)
       }else throw new Error("Connection not set yet!")
     }
-
-
-
-    /*onMessageWrapper(from,data){
-      this.onMessage(from,data)
-    } 
-    onDisconnectWrapper(from){
-      this.onDisconnect(from)
-    } 
-    onErrorWrapper(from,err){
-      this.onError(from,err)
-    }*/
     setCon(connection){
       //console.log("setting up connection for con: "+this.id)
+
       if (this.connection!==connection){
       this.connection=connection;
       let conData = this;
+      conData.lastContactDate=  Date.now();
       let onData = function(data){
-        console.log("Data received at con "+conData.id+".")
-        console.log(data)
-
+        conData.lastContactDate= Date.now();
+        if(data.command==="PING"){
+          console.log("PINGRECEIVED")
+          connection.send({"command":"PONG"})
+          return;
+        }else if(data.command==="PONG"){
+          return;
+        }else{
         //[...]
         if(conData.state!=="On"){
           conData.dataBacklog.enqueue(data);
@@ -139,13 +135,14 @@ class ConData{
           console.log(conData)
         }else{
           //if(data.command==="FORCLS"){
-          //  conData.onDisconnectWrapper(conData.id);
           //  conData.state="Off"
           //  conData.connection.close();
           //}
-          console.log(conData.funcStorage.onMessage)
+          //console.log("Data received at con "+conData.id+".")
+          //console.log(data)
+          //console.log(conData.funcStorage.onMessage)
           conData.funcStorage.onMessage(data);
-
+        }
         }
       }
       let onClose =  function(){
@@ -164,7 +161,28 @@ class ConData{
       this.funcStorage.onMessageOld =onData;
       this.funcStorage.onCloseOld =onClose;
       this.funcStorage.onErrorOld =onError;
-
+      let  myCallback = function() {
+        if(conData.state==="Off"){
+          window.clearInterval(intervalID);
+          return;
+        }
+        try{  
+          conData.connection.send({"command":"PING"})
+        }catch(err){
+          conData.connection.close()
+          console.log("Can't send message to "+conData.id)
+          conData.funcStorage.onCloseOld()
+          window.clearInterval(intervalID);
+        }
+        if( ((Date.now()-conData.lastContactDate)/1000)>3){
+          console.log("Connection timed out to "+conData.id)
+          conData.connection.close()
+          conData.funcStorage.onCloseOld()
+          window.clearInterval(intervalID);
+        }
+        
+      }
+      var intervalID = window.setInterval(myCallback, 1000);
       }
     }
     /**
@@ -194,10 +212,22 @@ class ConData{
       }
       let onData = //data => 
       function(data){
-        console.log("Data received at con "+conData.id+".")
-        console.log(data)
+        //console.log("Data received at con "+conData.id+".")
+        //console.log(data)
 
         //[...]
+        conData.lastContactDate= Date.now();
+        if(data.command==="PING"){
+          try{
+            conData.connection.send({"command":"PONG"})
+          }catch{
+
+          }
+          
+          return;
+        }else if(data.command==="PONG"){
+          return;
+        }else
         if(data.command==="FORCLS"){
             
           conData.state="Off"
@@ -211,10 +241,8 @@ class ConData{
         }else{
             console.log(conData.funcStorage.onMessage)
             conData.funcStorage.onMessage(conData.id,data);
-          
-
-
         }
+
       }
       let onErr = //err => 
       function(err){
@@ -243,6 +271,7 @@ class ConData{
         let data = this.dataBacklog.dequeue();
         this.funcStorage.onData(data);
       }
+
     }
     close(){
       try{
@@ -369,6 +398,24 @@ class ConHandler{
             this.cons.get(id).type="Normal"
           }
         });
+      }
+      createSpecialCon(id, onOpen = function(){}){
+        let con = this.peer.connect(id,CON_OPTIONS);
+        this.cons.set(id,new ConData(id,con,"Special","SettingUp"));
+        console.log("Creating special con to: "+id)
+
+        if(con.open){
+          this.cons.get(id).state="Validating";
+          this.eventCommunicator.emit("validateAndFinishSetup",[id]);
+          onOpen()
+        }else{
+          let conHandler = this;
+          con.on('open',function(){
+            conHandler.cons.get(id).state="Validating";
+            conHandler.eventCommunicator.emit("validateAndFinishSetup",[id]);
+            onOpen()
+          })
+        }
       }
       async checkIfConnectedIn(to,miliseconds){
         await delay(miliseconds);

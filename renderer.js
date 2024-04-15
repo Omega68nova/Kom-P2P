@@ -259,7 +259,6 @@ class chatData{
       }
       let u = chat.conTree.find(chat.nameFromPeerID(id));
       let me = chat.conTree.find(chat.myName)
-      //To-do set functions depending on conTree
       if(!u){//Not in conTree Ignore? close? probably close
         console.log("Con "+id+" not found in conTree, removing connection." )
         chat.conHandler.removeCon(id);
@@ -448,13 +447,126 @@ class chatData{
   nameFromPeerID(name){
     return (''+name).replace(preChatUser+this.name+'-','');
   }
-  handleFarCommand(from,command){
+  /**
+   * A array of objects that describe transferences structured like so
+   * {
+   *    peer: username
+   *    action: "s"/"r" <== sender or receiver of the file
+   *    file: filename
+   * }
+   * This is used to close the special connection when all transfers are finished.
+   */
+  fileTransfers=[]
+  handleFarCommand(from,data){
     //Nothing here yet
-    console.log("handleFarCommand:")
+  
+    let chat=this;
+    let dataOld=data;
+    let trueFrom;
+    if(data.contents){
+      let contents;
+      [trueFrom,contents] = chat.decodeMessage(data);
+      if(contents){
+        data=contents;
+      }else{
+        this.conHandler.sendTo([from],{"command":"ERR",'message':"Message not properly cyphered at "+chat.myName+"/"+from+"."});
+        console.log("Error reading contents!")
+        return;
+      }
+    }
+    let downloadingList=[]
+    //console.log("Data received at set con: "+data.command);
+    let fPath
+    if(data.filename){
+      fPath = path.join('.', 'UserData', chat.myName,chat.name,'Downloads',data.filename.replace(':',"_"));
+    }
+    switch (data.command) {
+
+      case 'FOFFNO':
+        let i = chat.fileTransfers.findIndex(transfer=>transfer.file===data.filename&&transfer.peer===from)
+        chat.fileTransfers.splice(i);
+        break;
+      case 'FOFFOK':
+        chat.loadAndSendFile(data.filename,from)
+        break;
+      case 'OFFERF':
+        if(chat.fileTransfers.findIndex(v=>v.file===data.filename)!==-1){
+          chat.send({"command":"FOFFNO","filename":data.filename},from)
+          return;
+        }
+        let downloadfolder = path.join('.', 'UserData', chat.myName,chat.name,'Downloads');
+        if(!fs.existsSync(downloadfolder)){
+          fs.mkdirSync(downloadfolder)
+        }
+        
+        chat.fileTransfers.push({
+          peer: from,
+          action: "r",
+          file: data.filename,
+          stream: fs.createWriteStream(fPath, {encoding: 'binary',flags: 'w'})
+        })
+        chat.send({"command":"FOFFOK","filename":data.filename},from)
+        break;
+      case 'FILDAT':
+        let transfer =chat.fileTransfers.find(v=>v.file===data.filename&&v.action==="r"&&v.peer===from);
+
+        if(!transfer){
+          chat.send({"command":"FOFFNO","filename":data.filename},from)
+          return;
+        }
+
+        //let fPath = path.join('.', 'UserData', chat.myName,chat.name,'Downloads',data.filename.replace(':',"_"));
+          
+        if(fs.existsSync(fPath)){
+          //TO-DO AAAAAAAAAAAAAA
+          transfer.stream.write(data.chunk)
+        }else{
+
+          //var writeStream = fs.createWriteStream(fPath, {encoding: 'binary',flags: 'w'});
+          //writeStream.write(data.chunk)
+          //writeStream.close()
+          //let filename = data.filename.replace(':','_')
+          //var writeStream = fs.createWriteStream(chat.fileLinks.get(data.filename).path, {flags: 'w'});
+          //writeStream.write(data.chunk)
+        }
+        break;
+      case 'FILEND':
+        let j = chat.fileTransfers.findIndex(transfer=>v=>v.file===data.filename&&v.action==="r"&&v.peer===from)
+        let [transfer2]=chat.fileTransfers.splice(j);
+        try{
+          transfer2.stream.close()
+        }catch(e){
+          console.log(e)
+        }
+
+        let d = {
+          "name":data.filename,
+          "path":path.join('.', 'UserData', chat.myName,chat.name,'downloads',data.filename.replace(':',"_")),
+          "date":data.lastModified,
+          "type":data.type,
+          "size":data.size,
+          "from":chat.nameFromPeerID(from)
+        }
+        let name= this.loadLink(d,true)
+        chat.displayFile(name)
+        break;
+      default:
+        console.log("bad message!");
+        this.conHandler.sendTo([from],{"command":"ERR",'message':"Message not understood at "+chat.myName+"."});
+
+    }
+    /*console.log("handleFarCommand:")
     console.log(command)
+    "command":"OFFERF", "file":filename,
+    chat.send({"command":"FILDAT","file":filename,"chunk":chunk},username)
+  }).on('end', function() {
+    chat.send({"command":"FILEND","file":filename},username)*/
   }
   send(data,to){
     this.conHandler.sendTo([to],this.encodeMessage(data))
+  }
+  sendNotEncoded(data,to){
+    this.conHandler.sendTo([to],data)
   }
   sendAsRoot(to,data){
     console.log("Sending from Root:")
@@ -483,7 +595,7 @@ class chatData{
       let children = meNode.childrenIDs()
       this.conHandler.setNecessaryConnections(children.map((childName)=>chat.peerIDFromName(childName)),awaitFrom.map((childName)=>chat.peerIDFromName(childName)))
     }
-   
+    chat.save()
   }
   updateRootConnections(){
     let chat = this;
@@ -584,7 +696,6 @@ class chatData{
             console.log("ASKDATA RECEIVED. Sending")
             this.sendAsRoot(from,chatData)
 
-            //TO-DO: Fix this SHIT... or do I? prob change to chat.conHandler.sendall(); and chat.conHandler.updateConnections(...);
             this.sendAllRoot(message);
             this.updateConnections();
 
@@ -608,7 +719,7 @@ class chatData{
             //chat.sendAllRoot(data);
             break;
         case 'NEWUSR':
-            //TO-DO: cyphering - check if original sender is admin
+
             let u = new user(data.role,data.name,data.puKey,true);
             if(!chat.addUser(u)){
               chat.findUser(data.name).puKey=data.puKey;
@@ -618,7 +729,7 @@ class chatData{
             //chat.sendAllRoot(data);
             break;
         case 'LOGOUT':
-            //TO-DO: cyphering - check if original sender is u or root
+
             chat.logout(data.name);
 
             chat.updateConnections()
@@ -699,7 +810,7 @@ class chatData{
     switch (data.command) {
       case 'LOGINN':
           if(trueFrom!==this.rootName){
-            this.conHandler.sendTo([from],{"command":"ERR",'message':"Tried to fake message!"});
+            chat.conHandler.sendTo([from],{"command":"ERR",'message':"Tried to fake message!"});
             return;
           }
           chat.login(data.name);
@@ -709,7 +820,7 @@ class chatData{
           break;
       case 'NEWUSR':
           if(trueFrom!==this.rootName){
-            this.conHandler.sendTo([from],{"command":"ERR",'message':"Tried to fake message!"});
+            chat.conHandler.sendTo([from],{"command":"ERR",'message':"Tried to fake message!"});
             return;
           }
           let u = new user(1,data.name,data.puKey,true);
@@ -769,8 +880,17 @@ class chatData{
           chat.send({"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(true),"admin":chat.adminName,"root":chat.rootName},from);
           break;
       case'SHLINK':
-        
+        chat.displayShareLink(trueFrom,data.filename,data.size)
+        chat.logs.push({"from":trueFrom,"file":data.filename,"size":data.size,"date":Date.now()})
+        console.log(chat.logs)
         chat.reSend(dataOld,from)
+        break;
+      case 'RQFILE':
+        if(chat.fileLinks.has(data.filename)){
+          chat.requestDirectFileTransfer(trueFrom,data.filename)
+        }else{
+          chat.reSend(dataOld,from)
+        }
         break;
       case 'ERR':
       //TO-DO: Error handling?
@@ -802,8 +922,8 @@ class chatData{
           }*/
           break;
       default:
-          console.log("bad message!");
-          this.conHandler.sendTo([from],{"command":"ERR",'message':"Message not understood at "+chat.myName+"."});
+          chat.handleFarCommand(from,data)
+
     }
   }
   async rootFailureProtocol(forced = true,attempt = 1){
@@ -855,55 +975,124 @@ class chatData{
 
       //chat.rootCommunicator.removeAllListeners();
    }
-
-    
-    
-
-  
-
-
-
-
-
 ////STORAGE AREA
 shareFiles(fileArray){
   let chat = this;
-  fileArray.forEach(file=>{
+  Array.from(fileArray).forEach(file=>{
     let name = chat.makeFileLink(file)
-    shareFileLink(name);
+    chat.shareFileLink(name);
   })
 }
-shareFileLink(name){
-  let file = this.fileLinks.get(name)
-  if(!file){
-    displayGeneralError("File not found.")
+  loadAndSendFile(filename,username){
+    let chat = this;
+    if (this.fileLinks.has(!filename)){
+      return false;
+    }else{
+      let link = this.fileLinks.get(filename);
+      let readStream = fs.createReadStream(link.path,{ highWaterMark: 1 * 1024, encoding: 'binary' });
+      readStream.on('data', function(chunk) {
+        chat.sendNotEncoded({"command":"FILDAT","filename":filename,"chunk":chunk},username)
+      }).on('end', function() {
+        chat.sendNotEncoded({"command":"FILEND","filename":filename,"date":link.lastModified,
+        "type":link.type,
+        "size":link.size},username)
+      });
+    }
+
   }
-  this.sendAll({
-    "command":"SHLINK",
-    "filename":name,
-    "type":file.type,
-    "size":file.size
-  })
-}
-   makeFileLink(file){
-    let name = file.name;
+//TO-DO
+/**
+ * Shows the sharing in the chat, if the sharer is not you it will show a download button.
+ * 
+ * @param {String} trueFrom 
+ * @param {String} filename 
+ * @param {Number} size 
+ */
+  displayShareLink(trueFrom,filename,size){
+    let chat=this;
+    console.log("Adding to chat!");
+    let li=document.createElement("li");
+    li.setAttribute('id',"chatfile-"+filename);
+    if(trueFrom === this.myName){
+      
+      let messageText = document.createTextNode("I started sharing the file \""+filename+"\" ("+displayFileSize(Number(size))+") ");
+      li.appendChild(messageText);
+
+    }else{
+      let messageText = document.createTextNode(trueFrom+" wants to share the file \""+filename+"\" ("+displayFileSize(Number(size))+") ");
+      var button = document.createElement("button");
+      button.innerHTML = "Request";
+      button.setAttribute('id',"chatFileButton-file-"+filename);
+      button.addEventListener ("click", function() {
+        chat.sendAll({"command":"RQFILE","filename":filename,"from":trueFrom})
+        
+        button.disabled=true;
+        button.innerHTML = "Requesting...";
+      });
+      li.appendChild(messageText);
+      li.appendChild(button);
+    }
+    addElementToChat(li)
+    if(trueFrom===this.myName||this.fileLinks.get(filename)){
+      this.displayFile(filename)
+    }
+  }
+  displayFile(filename){
+    let file = this.fileLinks.get(filename);
+    if(!file)return;
+    if(file.from!==this.myName)
+      document.getElementById("chatFileButton-file-"+filename).innerHTML = "Downloaded"
+
+    if(this.fileLinks.get(filename).type.includes("audio")){
+      let audio = document.createElement('audio');
+      audio.src = file.path;
+      audio.autoplay = false;
+      audio.controls=true;
+      document.getElementById("chatfile-"+filename).appendChild(audio)
+
+    }else
+    if(this.fileLinks.get(filename).type.includes("image")){
+      let img = document.createElement('img');
+      img.src = file.path;
+      document.getElementById("chatfile-"+filename).appendChild(img)
+
+    }else
+    if(this.fileLinks.get(filename).type.includes("video")){
+      let video = document.createElement('video');
+      video.src = file.path;
+      video.autoplay = false;
+      video.controls=true;
+      document.getElementById("chatfile-"+filename).appendChild(video)
+    }else
+    {}
+  }
+  shareFileLink(name){
+    let file = this.fileLinks.get(name)
+    if(!file){
+      displayGeneralError("File not found.")
+    }
+    this.sendAll({
+      "command":"SHLINK",
+      "filename":name,
+      "size":file.size
+    })
+    this.logs.push({"from":this.myName,"file":name,"size":file.size,"date":Date.now()})
+    this.displayShareLink(this.myName,name,file.size)
+  }
+  makeFileLink(file){
+    let name = this.myName+":"+file.name;
     let data = {
-      name:name,
-      path:file.webkitRelativePath,
-      date:file.lastModified,
-      type:file.type,
-      size:file.size,
-      from:this.myName
+      "name":name,
+      "path":file.path,
+      "date":file.lastModified,
+      "type":file.type,
+      "size":file.size,
+      "from":this.myName
     }
     name= this.loadLink(data,true)
     return name;
-   }
-   sendFileTo(name,to){
-    this.conHandler.sendDirect(to,data)//data
-
-   }
-
-   removeFile(name,shouldDelete){
+  }
+  removeFile(name,shouldDelete){
 
     let file = this.fileLinks.get(name);
     if(!file){
@@ -917,11 +1106,11 @@ shareFileLink(name){
       }
     }
       
-   }
-   pathBelongsToThisChat(p){
+  }
+  pathBelongsToThisChat(p){
     const relative = path.relative(path.join('.', 'UserData', this.myName,this.name), p);
     return relative && !relative.startsWith('..') && !path.isAbsolute(relative);
-   }
+  }
   usersToObject(){
 
     let objects =[];
@@ -957,7 +1146,7 @@ shareFileLink(name){
       }
     });
     fName = path.join('.', 'UserData', this.myName,this.name,'logs.json');
-    fs.writeFile(fName, JSON.stringify(this.logs), err => {
+    fs.writeFile(fName, this.stringifyLogs(), err => {
       if (err) {
         console.error(err);
       } else {
@@ -981,6 +1170,9 @@ shareFileLink(name){
       }
     });
   }
+  stringifyLogs(){
+    return JSON.stringify(this.logs.filter(log=>log.from))
+  }
   load(){
     let folderPath = path.join('.', 'UserData', this.myName,this.name);
     let usersPath = path.join('.', 'UserData', this.myName,this.name,'users.json');
@@ -993,15 +1185,16 @@ shareFileLink(name){
     if (fs.existsSync(configPath)) {
       this.readConfig(JSON.parse(fs.readFileSync(configPath,{encoding:"ascii"})))
     }
+    if (fs.existsSync(logsPath)) {
+      this.loadLinks(JSON.parse(fs.readFileSync(linkPath,{encoding:"ascii"})))
+    }
     if (fs.existsSync(usersPath)) {
       this.usersFromObject(JSON.parse(fs.readFileSync(usersPath,{encoding:"ascii"})),false)
     }
     if (fs.existsSync(logsPath)) {
       this.logsFromObject(JSON.parse(fs.readFileSync(logsPath,{encoding:"ascii"})))
     }
-    if (fs.existsSync(logsPath)) {
-      this.loadLinks(JSON.parse(fs.readFileSync(linkPath,{encoding:"ascii"})))
-    }
+
 
   }
   loadLinks(links){
@@ -1027,11 +1220,11 @@ shareFileLink(name){
     }
     this.fileLinks.set(linkObject.name,
       {
-        path:linkObject.path,
-        date:linkObject.date,
-        type:linkObject.type,
-        size:linkObject.size,
-        from:linkObject.from
+        "path":linkObject.path,
+        "date":linkObject.date,
+        "type":linkObject.type,
+        "size":linkObject.size,
+        "from":linkObject.from
       });
       return linkObject.name
   }
@@ -1063,6 +1256,7 @@ shareFileLink(name){
     }else{
       this.logs=this.logs.concat(logs);
     }
+    console.log(this.logs)
     
   }
   usersFromObject(usersObjects,outer=true){
@@ -1119,7 +1313,26 @@ shareFileLink(name){
       this.prKey=config.prKey;
     }
   }
+  requestDirectFileTransfer(to,filename){
+    let chat= this;
+    if(!this.conHandler.cons.has(this.peerIDFromName(to))){
+      this.conHandler.createSpecialCon(chat.peerIDFromName(to),function(){
+        chat.fileTransfers.push({
+              peer: to,
+              action: "s",
+              file: filename
+        })
+        chat.send({
+          "command":"OFFERF", "filename":filename
+        },chat.peerIDFromName(to))
+      });
 
+    }else
+    chat.send({
+      "command":"OFFERF", "filename":filename
+    },chat.peerIDFromName(to))
+
+  }
   ////OTHER
   /**
    * Closes all connections, basically making the chat dead.
@@ -1404,7 +1617,7 @@ function generateKeyPair(){
 class Message{
   constructor(user,date,message){
     this.id=nextmessageID;
-    this.user=user;
+    this.from=user;
     this.date=date;
     this.message=message;
 
@@ -1419,21 +1632,27 @@ class Message{
 
 
 //Add messages to chat
+function addElementToChat(e){
+  document.getElementById("chatBox").appendChild(e);
+}
 function addToChat(message){
   console.log("Adding to chat!");
-  let li=document.createElement("li");
-  li.setAttribute('id',message.id);
-  console.log(message);
-  let time = new Date(message.date);
-  let messageDate = document.createTextNode(''+time.getHours()+':'+time.getMinutes()+' ');
-  let name=document.createElement("b").appendChild(document.createTextNode(message.user));
-  let messageText = document.createTextNode(': ' + message.message);
-  
-  li.appendChild(messageDate);
-  li.appendChild(name);
-  li.appendChild(messageText);
-  //messages.push(mParsed);
-  document.getElementById("chatBox").appendChild(li);
+  console.log(message)
+
+    let li=document.createElement("li");
+    li.setAttribute('id',message.id);
+    console.log(message);
+    let time = new Date(message.date);
+    let messageDate = document.createTextNode(''+time.getHours()+':'+time.getMinutes()+' ');
+    let name=document.createElement("b").appendChild(document.createTextNode(message.from));
+    let messageText = document.createTextNode(': ' + message.message);
+    
+    li.appendChild(messageDate);
+    li.appendChild(name);
+    li.appendChild(messageText);
+    //messages.push(mParsed);
+    document.getElementById("chatBox").appendChild(li);
+
 }
 function addEventToChat(date,message){
   let li=document.createElement("li");
@@ -1617,10 +1836,17 @@ mainEvents.on('renderer:switched', function (data)  {
   console.log(data.logs);
   //myID=0;
   data.logs.forEach(function(item){
+    console.log(item)
     if(item.from){
-      console.log(item);
-      let m= new Message(item.from,item.date,item.message)
-      addToChat(m);
+      if(item.file){
+        console.log("ITS A FILE")
+        chats.get(currentChat).displayShareLink(item.from,item.file,item.size)
+      }else{
+        console.log(item);
+        let m= new Message(item.from,item.date,item.message)
+        addToChat(m);
+      }
+
     }else{
       addEventToChat(item.date,item.message);
       i=i+1;
@@ -1779,4 +2005,10 @@ function chatShareFile(){
   let chat = chats.get(currentChat);
   chat.shareFiles(document.getElementById("fileToShare").files);
 }
+function displayFileSize(byteCount){
+  let fileSize = byteCount.toString();
 
+  if(fileSize.length < 7) return `${Math.round(+fileSize/1024).toFixed(2)}kb`
+      return `${(Math.round(+fileSize/1024)/1000).toFixed(2)}MB`
+
+}

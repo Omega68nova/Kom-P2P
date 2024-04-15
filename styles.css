@@ -40,9 +40,11 @@ button{
 
     border: none;
     cursor: pointer;
-
-
 }
+image, video, audio{
+  width:100%
+}
+
 .open-button {
   background-color: #555;
   color: white;
@@ -108,4 +110,16 @@ button{
 /* Add some hover effects to buttons */
 .form-container .btn:hover, .open-button:hover {
   opacity: 1;
+}
+.scroller {
+  overflow: auto;
+  height: 100px;
+  display: flex;
+  flex-direction: column-reverse;
+  overflow-anchor: auto !important; /*  See https://developer.mozilla.org/en-US/docs/Web/CSS/overflow-anchor */
+}
+
+.scroller .scroller-content .item {
+  height: 20px;
+  transform: translateZ(0); /* fixes a bug in Safari iOS where the scroller doesn't update */
 }
