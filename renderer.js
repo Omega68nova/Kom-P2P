@@ -56,10 +56,10 @@ window.onload = function () {
     e.preventDefault();
     chatCreate();
   });
-  document.querySelector("#jcForm").addEventListener('submit', e => {
+  /*document.querySelector("#jcForm").addEventListener('submit', e => {
     e.preventDefault();
     chatJoin();
-  });
+  });*/
   document.querySelector("#chatTree").addEventListener('click', e => {
     e.preventDefault();
     chatShowTree();
@@ -79,6 +79,10 @@ window.onload = function () {
   document.querySelector("#fileUploadForm").addEventListener('click', e => {
     e.preventDefault();
     chatShareFile();
+  });
+  document.querySelector("#chatRQLOGS").addEventListener('click', e => {
+    e.preventDefault();
+    chats.get(currentChat).sendRoot({"command":"RQLOGS"})
   });
   show('start');
   hide('chat');
@@ -136,7 +140,7 @@ class chatData{
     //Data that is not always synced between users
     this.users=[];
     this.logs=[];
-    this.emotes=[];
+    this.emotes=new Map;
     this.on=false;
     //Private data
     this.isAdmin=isAdmin;
@@ -162,13 +166,22 @@ class chatData{
       this.rootCommunicator = new EventEmitter();
       this.setupRootComs(function(){
         displayGeneralError("Failed to Create chat, trying to log in instead.");
+        chat.isRoot=false;
+        chat.rootName=undefined;
+        try{
+          chat.rootConHandler.close()
+        }catch(e){
+
+        }
+        
+        chat.rootConHandler=undefined;
         chat.setupConHandler(onComplete,onFailure);
       }
         //onFailure
         );
-      this.rootConHandler = new ConHandler(preChat+name,undefined,function(){
+        chat.rootConHandler = new ConHandler(preChat+name,undefined,function(){
         chat.setupConHandler(onComplete,onFailure);
-      },this.rootCommunicator)
+      },chat.rootCommunicator)
     }else{
       chat.setupConHandler(onComplete,
         function(){
@@ -242,9 +255,12 @@ class chatData{
       console.log("NormalCommunicator request setup of connection to "+id)
       if(id === preChat+chat.name){
         onMessage= function(id,data){
-          if(!chat.on&&data.command==="GIVDAT"){chat.on=true;onComplete();};
-          if(data.command==="BADLOG"){displayGeneralError("Failed to log into chat.");onFailure();return;}
           chat.handleCommandFromAdmin(data)
+          if(!chat.on&&data.command==="GIVDAT"){chat.on=true;onComplete();//chat.sendRoot({'command':'RQLOGS'});        chat.sendRoot({'command':'SHLOGS'});
+          //chat.loadAndSendFile("logs",chat.rootName,1)
+        };
+          if(data.command==="BADLOG"){displayGeneralError("Failed to log into chat.");onFailure();return;}
+          
         }
         onDisconnect= function(id){
           if(chat.closed) return
@@ -267,27 +283,217 @@ class chatData{
         onMessage= function(id,data){chat.handleCommand(id,data)}
         isNormal = true;
         //onDisconnect= function(from){if(from===chat.peerIDFromName(chat.rootName))chat.rootFailureProtocol()}
-        //onDisconnect= function(id){chat.conHandler.sendRoot({"command":'USRLOS',"name":chat.nameFromPeerID(id)})};
-      }else{// user is in contree but not a neighboor, set handlers
+        //onDisconnect= function(id){ ////CAUTION - ENABLING THIS BREAKS THE CLOSE FUNCTION FOR SOME REASON DONT TOUCH
+          //if(id===chat.peerIDFromName(chat.rootName))chat.rootFailureProtocol()
+          //else chat.sendRoot({"command":'USRLOS',"name":chat.nameFromPeerID(id)})
+        //};
+
+        }else{// user is in contree but not a neighboor, set handlers
         onMessage= function(id,data){chat.handleFarCommand(id,data)}
-      }
+        /*onDisconnect=function(id){ ABCD
+          let transfer
+          if(transfer = chat.fileTransfers.find(t=>t.peer===chat.nameFromPeerID(id))!==null){
+            if(transfer.action==="s")
+            chat.conHandler.resetCon(id)
+          }
+        }*/
+        }
+        
+      
       chat.conHandler.finishConSetup(id,onMessage,onDisconnect,onError,isNormal)
     });
    // this.normalCommunicator.on("resetUpRootCon",function(){
 
     //})
+    this.normalCommunicator.on("resetUpRootCon",function(){
+      try{
+        chat.conHandler.restartRootCon(function(){
+          
+          console.log("Root succesfully reset connections to.")
+        })
+      }catch(err){
+        console.log(err)
+      }
+
+    })
     this.normalCommunicator.on("failureAt",function(name){
       console.log("Failure at"+name+"!")
       if(""+name===preChat+chat.chatName//||name===chat.peerIDFromName(chat.rootName)
       ){
 
-        chat.rootFailureProtocol(chat.myName===chat.rootName||chat.users.findIndex(this.rootName)!==-1||!chat.users.findUser(this.rootName).online)
+        chat.rootFailureProtocol(chat.myName===chat.rootName||chat.users.findIndex(chat.rootName)!==-1||!chat.users.findUser(chat.rootName).online)
+      }else{
+        chat.sendRoot({"command":'USRLOS',"name":chat.nameFromPeerID(id)})
       }
     });
     this.conHandler = new ConHandler(chat.peerIDFromName(this.myName),preChat+this.name,function(){
       onComplete
     },this.normalCommunicator)
     
+  }
+
+
+
+  reSend(data,from){
+    console.log("Resending:")
+    console.log(data)
+    this.conHandler.sendExcept([from],data)
+  }
+  sendAll(data){
+    console.log("Sending all:")
+    console.log(data)
+    this.conHandler.sendAll(this.encodeMessage(data))
+  }
+  sendRoot(data){
+    console.log("Sending to root:")
+    console.log(data)
+    this.conHandler.sendRoot(data)
+  }
+  sendAllRoot(data){
+    console.log("Sending to all as root:")
+    console.log(data)
+    this.rootConHandler.sendAll(data)
+  }
+
+  login(name){
+
+    let u=this.findUser(name);
+    if(u){
+      if(!u.online){
+        let event = {'date': new Date().getTime(),'message':'User '+name+' rejoined the chat.','chat':this.name}
+        mainEvents.emit('renderer:chatEvent',event);
+        this.logs.push(event);
+        u.online=true;
+        if(!this.conTree.find(u.name)){
+          this.conTree.insert(name);
+          this.updateConnections();
+        }
+
+      }else{
+        console.log("User already online.")
+      }
+
+      
+    }else{
+
+      throw new Error('User not found!');
+    }
+  }
+  logout(name){
+    //check if user is in users first
+    //logout from users, remove from tree, then if neighboors affected by change change connections
+    //this.rootConHandler.sendAll({"command":'LOGOUT',"name":this.nameFromPeerID(id)})
+    //console.log("User logging out: "+ name)
+    //this.pre(insideAnother);
+
+    let u=this.findUser(name);
+    if(u){
+      if(u.online===true){
+        
+        let event = {'date': new Date().getTime(),'message':'User '+name+' left the chat.','chat':this.name}
+        mainEvents.emit('renderer:chatEvent',event);
+        this.logs.push(event);
+        u.online=false;
+        this.conTree.remove(name);
+        //if(name===this.adminName) this.rootFailureProtocol(undefined,true);
+        this.updateConnections();
+      }
+    }else{
+      //this.post(insideAnother);
+      throw new Error('User not found!');
+    }
+    //this.post(insideAnother);
+  }
+
+  addUser(u){
+    if(!this.findUser(u.name)){
+      let event = {'date': new Date().getTime(),'message':'User '+u.name+' joined the chat.','chat':this.name}
+      mainEvents.emit('renderer:chatEvent',event);
+      this.logs.push(event);
+      this.users.push(u);
+      if(u.online && this.conTree&&!this.conTree.find(u.name)){
+          this.conTree.insert(u.name);
+          this.updateConnections();
+      }
+      return true;
+    }else{
+      console.log('User already exists in user database. Logging user in instead.');
+      this.login(u.name);
+      return false;
+    }
+  }
+  findUser(name){
+    for (let i = 0; i < this.users.length; i++) {
+      if (this.users[i].name===name) {
+        return this.users[i];
+      }
+    }
+    return null;
+  }
+  deleteUser(name){
+    let event = {'date': new Date().getTime(),'message':'User '+name+' was kicked from the chat.','chat':this.name}
+    mainEvents.emit('renderer:chatEvent',event);
+    this.logs.push(event);
+    u=this.findUser(name);
+    if(u){
+      u.online=false;
+      this.conTree.remove(name);
+      this.updateConnections();
+    }else{
+      throw new Error('User not found!');
+    }
+  };
+
+  ////PROTOCOL AREA
+/**
+ * Returns a peer ID from the id stored in the database.
+ * @param {String} id 
+ * @returns {String}
+ */
+  peerIDFromName(id){
+    if(id.startsWith(preChatUser+this.name+'-'))return id
+    return preChatUser+this.name+'-'+id;
+  }
+  /**
+ * Returns ID of the user from the peer name.
+ * @param {String} name con.peer
+ * @returns {String}
+ */
+  nameFromPeerID(name){
+    return (''+name).replace(preChatUser+this.name+'-','');
+  }
+
+  canUser(username,behaviour){
+    let u = this.findUser(username);
+    if(u){
+      if(this.getBehaviourPermLevel(behaviour)>=u.role){
+        return true;
+      }
+    }
+   return false;
+  }
+  getBehaviourPermLevel(behaviour){
+    let s = this.settings.get(behaviour);
+    if(s) return s;
+    return 2;
+  }
+  conIsLegal(con){
+    if(con.peer.startsWith(preChatUser+this.name+'-')){
+        //if(this.users.find((u)=>u.name===con.peer&&u.online===true&&u.role<3))
+            return true;
+    }
+    return false;
+  }
+  conIsLegalForAdmin(from){
+      if(from.startsWith(preChatUser+this.name+'-')){
+          let u =this.users.find((u)=>u.name===this.nameFromPeerID(from))
+          if(u){
+              if(u.online)
+                  return ["online",u];
+              return ["offline",u];
+          }
+          return ["unregistered",undefined];
+      }else return [null,null];
   }
 
   encodeMessage(message){
@@ -320,491 +526,28 @@ class chatData{
     }
   }
 
-  reSend(data,from){
-    console.log("Resending:")
-    console.log(data)
-    this.conHandler.sendExcept([from],data)
-  }
-  sendAll(data){
-    console.log("Sending all:")
-    console.log(data)
-    this.conHandler.sendAll(this.encodeMessage(data))
-  }
-  sendRoot(data){
-    console.log("Sending to root:")
-    console.log(data)
-    this.conHandler.sendRoot(data)
-  }
-  sendAllRoot(data){
-    console.log("Sending to all as root:")
-    console.log(data)
-    this.rootConHandler.sendAll(data)
-  }
-
-  login(name){
-
-    let u=this.findUser(name);
-    if(u){
-      if(!u.online){
-        let event = {'date': new Date().getTime(),'message':'User '+name+' rejoined the chat.'}
-        mainEvents.emit('renderer:chatEvent',event);
-        this.logs.push(event);
-        u.online=true;
-        if(!this.conTree.find(u.name)){
-          this.conTree.insert(name);
-          this.updateConnections();
-        }
-
-      }else{
-        console.log("User already online.")
-      }
-
-      
-    }else{
-
-      throw new Error('User not found!');
-    }
-  }
-  logout(name){
-    //check if user is in users first
-    //logout from users, remove from tree, then if neighboors affected by change change connections
-    //this.rootConHandler.sendAll({"command":'LOGOUT',"name":this.nameFromPeerID(id)})
-    //console.log("User logging out: "+ name)
-    //this.pre(insideAnother);
-
-    let u=this.findUser(name);
-    if(u){
-      if(u.online===true){
-        
-        let event = {'date': new Date().getTime(),'message':'User '+name+' left the chat.'}
-        mainEvents.emit('renderer:chatEvent',event);
-        this.logs.push(event);
-        u.online=false;
-        this.conTree.remove(name);
-        //if(name===this.adminName) this.rootFailureProtocol(undefined,true);
-        this.updateConnections();
-      }
-    }else{
-      //this.post(insideAnother);
-      throw new Error('User not found!');
-    }
-    //this.post(insideAnother);
-  }
-
-  addUser(u){
-    if(!this.findUser(u.name)){
-      let event = {'date': new Date().getTime(),'message':'User '+u.name+' joined the chat.'}
-      mainEvents.emit('renderer:chatEvent',event);
-      this.logs.push(event);
-      this.users.push(u);
-      if(u.online && this.conTree&&!this.conTree.find(u.name)){
-          this.conTree.insert(u.name);
-          this.updateConnections();
-      }
-      return true;
-    }else{
-      console.log('User already exists in user database. Logging user in instead.');
-      this.login(u.name);
-      return false;
-    }
-  }
-  findUser(name){
-    for (let i = 0; i < this.users.length; i++) {
-      if (this.users[i].name===name) {
-        return this.users[i];
-      }
-    }
-    return null;
-  }
-  deleteUser(name){
-    let event = {'date': new Date().getTime(),'message':'User '+name+' was kicked from the chat.'}
-    mainEvents.emit('renderer:chatEvent',event);
-    this.logs.push(event);
-    u=this.findUser(name);
-    if(u){
-      u.online=false;
-      this.conTree.remove(name);
-      this.updateConnections();
-    }else{
-      throw new Error('User not found!');
-    }
-  };
-
-  ////PROTOCOL AREA
-/**
- * Returns a peer ID from the id stored in the database.
- * @param {String} id 
- * @returns {String}
- */
-  peerIDFromName(id){
-    return preChatUser+this.name+'-'+id;
-  }
-  /**
- * Returns ID of the user from the peer name.
- * @param {String} name con.peer
- * @returns {String}
- */
-  nameFromPeerID(name){
-    return (''+name).replace(preChatUser+this.name+'-','');
-  }
-  /**
-   * A array of objects that describe transferences structured like so
-   * {
-   *    peer: username
-   *    action: "s"/"r" <== sender or receiver of the file
-   *    file: filename
-   * }
-   * This is used to close the special connection when all transfers are finished.
-   */
-  fileTransfers=[]
-  handleFarCommand(from,data){
-    //Nothing here yet
-  
-    let chat=this;
-    let dataOld=data;
-    let trueFrom;
-    if(data.contents){
-      let contents;
-      [trueFrom,contents] = chat.decodeMessage(data);
-      if(contents){
-        data=contents;
-      }else{
-        this.conHandler.sendTo([from],{"command":"ERR",'message':"Message not properly cyphered at "+chat.myName+"/"+from+"."});
-        console.log("Error reading contents!")
-        return;
-      }
-    }
-    let downloadingList=[]
-    //console.log("Data received at set con: "+data.command);
-    let fPath
-    if(data.filename){
-      fPath = path.join('.', 'UserData', chat.myName,chat.name,'Downloads',data.filename.replace(':',"_"));
-    }
-    switch (data.command) {
-
-      case 'FOFFNO':
-        let i = chat.fileTransfers.findIndex(transfer=>transfer.file===data.filename&&transfer.peer===from)
-        chat.fileTransfers.splice(i);
-        break;
-      case 'FOFFOK':
-        chat.loadAndSendFile(data.filename,from)
-        break;
-      case 'OFFERF':
-        if(chat.fileTransfers.findIndex(v=>v.file===data.filename)!==-1){
-          chat.send({"command":"FOFFNO","filename":data.filename},from)
-          return;
-        }
-        let downloadfolder = path.join('.', 'UserData', chat.myName,chat.name,'Downloads');
-        if(!fs.existsSync(downloadfolder)){
-          fs.mkdirSync(downloadfolder)
-        }
-        
-        chat.fileTransfers.push({
-          peer: from,
-          action: "r",
-          file: data.filename,
-          stream: fs.createWriteStream(fPath, {encoding: 'binary',flags: 'w'})
-        })
-        chat.send({"command":"FOFFOK","filename":data.filename},from)
-        break;
-      case 'FILDAT':
-        let transfer =chat.fileTransfers.find(v=>v.file===data.filename&&v.action==="r"&&v.peer===from);
-
-        if(!transfer){
-          chat.send({"command":"FOFFNO","filename":data.filename},from)
-          return;
-        }
-
-        //let fPath = path.join('.', 'UserData', chat.myName,chat.name,'Downloads',data.filename.replace(':',"_"));
-          
-        if(fs.existsSync(fPath)){
-          //TO-DO AAAAAAAAAAAAAA
-          transfer.stream.write(data.chunk)
-        }else{
-
-          //var writeStream = fs.createWriteStream(fPath, {encoding: 'binary',flags: 'w'});
-          //writeStream.write(data.chunk)
-          //writeStream.close()
-          //let filename = data.filename.replace(':','_')
-          //var writeStream = fs.createWriteStream(chat.fileLinks.get(data.filename).path, {flags: 'w'});
-          //writeStream.write(data.chunk)
-        }
-        break;
-      case 'FILEND':
-        let j = chat.fileTransfers.findIndex(transfer=>v=>v.file===data.filename&&v.action==="r"&&v.peer===from)
-        let [transfer2]=chat.fileTransfers.splice(j);
-        try{
-          transfer2.stream.close()
-        }catch(e){
-          console.log(e)
-        }
-
-        let d = {
-          "name":data.filename,
-          "path":path.join('.', 'UserData', chat.myName,chat.name,'downloads',data.filename.replace(':',"_")),
-          "date":data.lastModified,
-          "type":data.type,
-          "size":data.size,
-          "from":chat.nameFromPeerID(from)
-        }
-        let name= this.loadLink(d,true)
-        chat.displayFile(name)
-        break;
-      default:
-        console.log("bad message!");
-        this.conHandler.sendTo([from],{"command":"ERR",'message':"Message not understood at "+chat.myName+"."});
-
-    }
-    /*console.log("handleFarCommand:")
-    console.log(command)
-    "command":"OFFERF", "file":filename,
-    chat.send({"command":"FILDAT","file":filename,"chunk":chunk},username)
-  }).on('end', function() {
-    chat.send({"command":"FILEND","file":filename},username)*/
-  }
-  send(data,to){
-    this.conHandler.sendTo([to],this.encodeMessage(data))
-  }
-  sendNotEncoded(data,to){
-    this.conHandler.sendTo([to],data)
-  }
-  sendAsRoot(to,data){
-    console.log("Sending from Root:")
-    console.log(data)
-    this.rootConHandler.sendTo([to],data)
-  }
-  updateConnections(){
-    if (this.isRoot){
-      this.updateRootConnections()
-    }
-    let chat = this;
-    let rootUser = this.users.find(user=>user.name===this.rootName);
-    if(!rootUser||!rootUser.online){
-      this.rootFailureProtocol(true);
-      return;
-    }
-
-
-
-    let meNode = this.conTree.find(this.myName);
-    if(meNode){
-      let parent = meNode.parentID()
-      let awaitFrom;
-      if (parent) awaitFrom = [parent] 
-      else awaitFrom = []
-      let children = meNode.childrenIDs()
-      this.conHandler.setNecessaryConnections(children.map((childName)=>chat.peerIDFromName(childName)),awaitFrom.map((childName)=>chat.peerIDFromName(childName)))
-    }
-    chat.save()
-  }
-  updateRootConnections(){
-    let chat = this;
-    let userIDs = this.users.filter((u)=>u.online===true).map((u)=>this.peerIDFromName(u.name))
-    this.rootConHandler.setNecessaryConnections([],userIDs)
-  }
-  canUser(username,behaviour){
-    let u = this.findUser(username);
-    if(u){
-      if(this.getBehaviourPermLevel(behaviour)>=u.role){
-        return true;
-      }
-    }
-   return false;
-  }
-  getBehaviourPermLevel(behaviour){
-    let s = this.settings.get(behaviour);
-    if(s) return s;
-    return 2;
-  }
-  conIsLegal(con){
-    if(con.peer.startsWith(preChatUser+this.name+'-')){
-        //if(this.users.find((u)=>u.name===con.peer&&u.online===true&&u.role<3))
-            return true;
-    }
-    return false;
-  }
-  conIsLegalForAdmin(from){
-    let chat = this;
-      if(from.startsWith(preChatUser+this.name+'-')){
-          let u =this.users.find((u)=>u.name===this.nameFromPeerID(from))
-          if(u){
-              if(u.online)
-                  return "online",u;
-              return "offline",u;
-          }
-          return "unregistered",undefined;
-      }else return null;
-  }
-  handleCommandToAdmin(from,data){
-    console.log("handleCommandToAdmin:")
-    console.log(from, data)
-    let uState,u = this.conIsLegalForAdmin(from);
-    let chat = this;
-    if(uState ==="online"){
-        switch (data.command) {
-            case 'ASKDAT':
-                let chatData ={"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(),"admin":chat.adminName,"root":chat.rootName};
-                chat.sendAsRoot(from,chatData)
-                break;
-            case 'USRLOS':
-                console.log("User lost!");
-                if(this.rootConHandler.cons.has(data.name)&&this.rootConHandler.cons.get(data.name).state!=="Off"){
-                  let chatData ={"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(),"admin":chat.adminName,"root":chat.rootName};
-                  chat.sendAsRoot(from,chatData)
-                }else{
-                  //let message ={'date':new Date().getTime(),'message':data.name+' logged out.'};
-                  //mainEvents.emit('renderer:chatEvent',message);
-                  //chat.logs.push(message);
-  
-                  chat.sendAllRoot({"command":'LOGOUT',"name":data.name});
-                }
-                break;
-            case 'USRKEY':
-              this.sendAllRoot({'command':"KEYCHG",'name':from,'puKey':data.puKey})
-              break;
-            default:
-                console.log("Unhandled command at admincon to "+con.peer+".");
-        }
-    }else{
-        if(data.command==="USRDAT"){
-            let message;
-            
-            if((uState === "unregistered" || !uState) ){
-              if( chat.pass===data.pass){
-                u=new user(1,chat.nameFromPeerID(from),importKey(data.puKey),true);
-                chat.addUser(u);
-                message={"command":'NEWUSR',"role":u.role,"name":u.name,"puKey":u.puKey};
-              }else{
-                this.sendAsRoot(from,{"command":"BADLOG"})
-                this.rootConHandler.removeCon(from);
-                return;
-              }
-
-            }
-            if(uState === "offline"){
-              if(chat.pass===data.pass){
-                u.puKey=importKey(data.puKey)
-                chat.login(u.name);
-                message={"command":'LOGINN',"name":from};
-              }else{
-                  this.sendAsRoot(from,{"command":"BADLOG"})
-                  this.rootConHandler.removeCon(from);
-                  return;
-                }
-            }
-            let chatData ={"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(),"admin":chat.adminName,"root":chat.rootName};
-            console.log("ASKDATA RECEIVED. Sending")
-            this.sendAsRoot(from,chatData)
-
-            this.sendAllRoot(message);
-            this.updateConnections();
-
-            //chat.updateConnections();
-        }else{
-            //chat.sendAsRoot(from,{"command":'ERR','message':'Bad Login.'})
-            //con.close();
-        }
-    }
-
-  }
-  handleCommandFromAdmin(data){
-    console.log("handleCommandFromAdmin:")
-    console.log(data)
-    let chat=this;
-    switch (data.command) {
-          case 'LOGINN':
-            chat.login(data.name);
-
-            chat.updateConnections()
-            //chat.sendAllRoot(data);
-            break;
-        case 'NEWUSR':
-
-            let u = new user(data.role,data.name,data.puKey,true);
-            if(!chat.addUser(u)){
-              chat.findUser(data.name).puKey=data.puKey;
-            }
-
-            chat.updateConnections()
-            //chat.sendAllRoot(data);
-            break;
-        case 'LOGOUT':
-
-            chat.logout(data.name);
-
-            chat.updateConnections()
-            //chat.sendAllRoot(data);
-            break;
-        case 'CYPHER':
-          console.log("cypher received");
-          this.adminPuKey=data.puKey;
-        case 'GIVDAT':
-            //console.log(data.tree)
-            chat.conTree.fromObject(data.tree);
-            chat.usersFromObject(data.users);
-            chat.adminName=data.admin;
-            chat.rootName=data.root;
-            chat.updateConnections();
-            break;
-        case 'UPTCON':
-            this.sendRoot({"command":'ASKDAT'});
-            break;
-        case 'KEYCHG':
-            this.findUser(data.name).puKey=data.puKey;
-            break;  
-        case 'DUPCON':
-            break;
-        default:
-    }
-  }
-  displayUsers(){
-    var table = document.createElement('TABLE');
-    table.border = '1';
-  
-    var tableBody = document.createElement('TBODY');
-    table.appendChild(tableBody);
-  
-    var tr = document.createElement('TR');
-    tableBody.appendChild(tr);
-    let names = ["Name:","Role:","Public key:","Online:"]
-    let value = ["name","role","puKey","online"]
-    for (var j = 0; j < names.length; j++) {
-      var td = document.createElement('TD');
-      td.width = '75';
-      td.appendChild(document.createTextNode(names[j]));
-      tr.appendChild(td);
-    }
-
-    this.users.forEach(function(user){
-      var tr = document.createElement('TR');
-      tableBody.appendChild(tr);
-  
-      for (var j = 0; j < names.length; j++) {
-        var td = document.createElement('TD');
-        td.width = '75';
-        td.appendChild(document.createTextNode(user[value[j]]));
-        tr.appendChild(td);
-      }
-    })
-
-    return table
-  }
   handleCommand(from,data){
-    console.log("HandleCommand:")
+    //console.log("HandleCommand:")
     //console.log(data)
     let chat=this;
     let dataOld=data;
-    let trueFrom;
+    let trueFrom=chat.nameFromPeerID(from);
     if(data.contents){
       let contents;
       [trueFrom,contents] = chat.decodeMessage(data);
       if(contents){
         data=contents;
       }else{
-        this.conHandler.sendTo([from],{"command":"ERR",'message':"Message not properly cyphered at "+chat.myName+"/"+from+"."});
+        this.conHandler.send({"command":"ERR",'message':"Message not properly cyphered at "+chat.myName+"/"+from+"."},from);
         console.log("Error reading contents!")
         return;
       }
+    }else trueFrom= chat.nameFromPeerID(from)
+    if(data.command!=="FILDAT"){
+      console.log(trueFrom)
+      console.log(data)
+    }else{
+      //console.log("Sending file data from:"+trueFrom)
     }
     //console.log("Data received at set con: "+data.command);
     switch (data.command) {
@@ -922,83 +665,631 @@ class chatData{
           }*/
           break;
       default:
-          chat.handleFarCommand(from,data)
+          if(!chat.handleEmoteCommand(from,trueFrom,data))
+            chat.handleFileCommand(from,trueFrom,data)
+
 
     }
   }
-  async rootFailureProtocol(forced = true,attempt = 1){
+
+  setEmo(name,fileLink){
+    this.sendAllRoot({'command':'NEWEMO','name':name,'fileLink':fileLink})
+  }
+  handleEmoteCommand(from,trueFrom,data){
+  switch(data.commmand){
+    case 'NEWEMO':
+      if(trueFrom===this.rootName)
+        this.emotes.set(data.name,data.fileLink)
+        return true;
+    case'REMEMO':
+      if(trueFrom===this.rootName)
+        this.emotes.delete(data.name)
+      return true;
+    case 'OFFEMO':
+      if(this.myName===this.rootName){
+        if(!this.fileLinks.has(data.fileLink)){
+          this.send({"command":"RQFILE","filename":data.fileLink},from)
+        }
+        
+          
+      }
+
+       
+      return true;
+    default:
+      return false;
+  }
+}
+/**
+ * 
+ * @param {*} from the id of the peer the data was received from. (peerId format)
+ * @param {*} trueFrom the name of the true origin of the data. (name format)
+ * @param {Object} data the data that is being handled.
+ * @param {Number} comMode 0 (default) => sends as normal. 1 => sends TO root, 2 => sends FROM root to the user.
+ * @returns 
+ */
+  handleFileCommand(from,trueFrom,data,comMode=0){
+    let chat = this;
+    let fPath
+    let sendF
+      if(comMode===0)
+        sendF = function(data,to){
+          chat.sendNotEncoded(data,to)
+        }
+      else if (comMode ===1) 
+        sendF  = function(data,to){
+          chat.sendRoot(data)
+        }
+      else
+        sendF  = function(data,to){
+          chat.sendAsRoot(data,to)
+        }
+    if(data.filename){
+      fPath = path.join('.', 'UserData', chat.myName,chat.name,'Downloads',(""+data.filename).replace(':',"_"));
+    }
+    switch (data.command) {
+      case 'RQLOGS':
+        console.log("Beginning to send logs.")
+        sendF({'command':'SHLOGS'},from);
+        this.loadAndSendFile("logs",trueFrom,comMode)
+        break;
+      case 'SHLOGS':
+        chat.fileTransfers.push({
+          peer: trueFrom,
+          action: "r",
+          file: "logs",
+          stream: fs.createWriteStream( path.join('.', 'UserData', chat.myName,chat.name,(trueFrom+"_logs")), {encoding: 'binary',flags: 'w'})
+        })
+        break;
+      case 'FOFFNO':
+        let i = chat.fileTransfers.findIndex(transfer=>transfer.file===data.filename&&transfer.peer===chat.trueFrom)
+        chat.fileTransfers.splice(i);
+        break;
+      case 'FOFFOK':
+
+        this.loadAndSendFile(data.filename,trueFrom,comMode)
+
+        break;
+      case 'OFFERF':
+        if(chat.fileTransfers.findIndex(v=>v.file===data.filename)!==-1){
+          sendF({"command":"FOFFNO","filename":data.filename},from)
+          return;
+        }
+        let downloadfolder = path.join('.', 'UserData', chat.myName,chat.name,'Downloads');
+        if(!fs.existsSync(downloadfolder)){
+          fs.mkdirSync(downloadfolder)
+        }
+        
+        chat.fileTransfers.push({
+          peer: trueFrom,
+          action: "r",
+          file: data.filename,
+          stream: fs.createWriteStream(fPath, {encoding: 'binary',flags: 'w'})
+        })
+        sendF({"command":"FOFFOK","filename":data.filename},from)
+        break;
+      case 'FILDAT':
+        let transfer =chat.fileTransfers.find(v=>v.file===data.filename&&v.action==="r");
+
+        if(!transfer||transfer.peer!==trueFrom&&data.filename!=="logs"){
+          sendF({"command":"FOFFNO","filename":data.filename},from)
+        }
+        transfer =chat.fileTransfers.find(v=>v.file===data.filename&&v.action==="r"&&v.peer===trueFrom);
+
+        if(!transfer){
+          sendF({"command":"FOFFNO","filename":data.filename},from)
+          return;
+        }
+        if(!transfer.chunksLeft){
+          transfer.chunksLeft=10;
+        }
+        transfer.chunksLeft--;
+         chat.ensureConStability()
+        //let fPath = path.join('.', 'UserData', chat.myName,chat.name,'Downloads',data.filename.replace(':',"_"));
+          
+       // if(fs.existsSync(fPath)){
+          console.log("Writing into file.")
+          transfer.stream.write(data.chunk)
+          transfer.stream.once('drain', function(){
+            
+            window.setTimeout(function(){sendF({"command":"FDATOK","filename":data.filename},from)},1000)
+          });
+            
+          
+          
+        //}else{
+
+          //var writeStream = fs.createWriteStream(fPath, {encoding: 'binary',flags: 'w'});
+          //writeStream.write(data.chunk)
+          //writeStream.close()
+          //let filename = data.filename.replace(':','_')
+          //var writeStream = fs.createWriteStream(chat.fileLinks.get(data.filename).path, {flags: 'w'});
+          //writeStream.write(data.chunk)
+
+        break;
+      case 'FDATOK':
+        let chunk;
+        let transfer3 = chat.fileTransfers.find(t=>t.peer=trueFrom&&t.action==="s"&&t.file===data.filename)
+        let step = 0;
+        while ((chunk = transfer3.stream.read()) !== null&&step<10) {
+          step++
+          sendF({"command":"FILDAT","filename":data.filename,"chunk":chunk},chat.peerIDFromName(trueFrom))
+        }
+        break;
+      case 'FILEND':
+        let j = chat.fileTransfers.findIndex(v=>v.file===data.filename&&v.action==="r"&&v.peer===trueFrom)
+        if(j===-1){
+          return;
+        }
+        let [transfer2]=chat.fileTransfers.splice(j);
+        try{
+          transfer2.stream.close()
+        }catch(e){
+          console.log(e)
+        }
+        if(transfer2.file==="logs"){
+          console.log("Starting log merge.")
+          let logsPath =  path.join('.', 'UserData', chat.myName,chat.name,(trueFrom+"_logs"))
+          if (fs.existsSync(logsPath)) {
+            
+            let l = (fs.readFileSync(logsPath,{encoding:"binary"}))
+            console.log(l)
+            if(chat.logsFromObject(JSON.parse(l))){
+              resetChat(chat.logs)
+            }
+            fs.rm(logsPath,console.log);
+          }
+         
+        }else{
+          let d = {
+            "name":data.filename,
+            "path":path.join('.', 'UserData', chat.myName,chat.name,'downloads',(""+data.filename).replace(':',"_")),
+            "date":data.date,
+            "type":data.type,
+            "size":data.size,
+            "from":chat.nameFromPeerID(trueFrom)
+          }
+          let name= this.loadLink(d,true)
+          chat.displayFile(name)
+        }
+
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+  /**
+   * A array of objects that describe transferences structured like so
+   * {
+   *    peer: username
+   *    action: "s"/"r" <== sender or receiver of the file
+   *    file: filename
+   * }
+   * This is used to close the special connection when all transfers are finished.
+   */
+  fileTransfers=[]
+  async handleFarCommand(from,data){
+    //Nothing here yet
+  
+    let chat=this;
+    let dataOld=data;
+    let trueFrom=from;
+    if(data.contents){
+      let contents;
+      [trueFrom,contents] = chat.decodeMessage(data);
+      if(contents){
+        data=contents;
+      }else{
+        this.conHandler.sendTo([from],{"command":"ERR",'message':"Message not properly cyphered at "+chat.myName+"/"+from+"."});
+        console.log("Error reading contents!")
+        return;
+      }
+    }else trueFrom= chat.nameFromPeerID(from)
+    if(data.command!=="FILDAT"){
+      console.log(trueFrom)
+      console.log(data)
+    }else{
+      //console.log("Sending file data from:"+trueFrom)
+    }
+
+
+    //console.log("Data received at set con: "+data.command);
+    chat.handleFileCommand(from,trueFrom,data)
+    /*console.log("handleFarCommand:")
+    console.log(command)
+    "command":"OFFERF", "file":filename,
+    chat.send({"command":"FILDAT","file":filename,"chunk":chunk},username)
+  }).on('end', function() {
+    chat.send({"command":"FILEND","file":filename},username)*/
+  }
+  timesUntilEnsureConStability=5;
+
+  ensureConStability(){
+
+    this.timesUntilEnsureConStability--;
+    if(this.timesUntilEnsureConStability<0){
+      this.timesUntilEnsureConStability=5
+      this.conHandler.sendRoot({"command":"PING"})
+      if(this.rootConHandler){
+        this.rootConHandler.sendAll({"command":"PING"})
+      }
+      let now = Date.now()
+      this.conHandler.rootCon.lastContactDate=now
+      if(this.rootConHandler){
+        this.rootConHandler.cons.forEach(cD=>cD.lastContactDate=now)
+      }
+    }
+
+  }
+  send(data,to){
+    this.conHandler.send(this.encodeMessage(data),to)
+  }
+  sendNotEncoded(data,to){
+    this.conHandler.send(data,to)
+  }
+  sendAsRoot(data,to){
+    console.log("Sending from Root:")
+    console.log(data)
+    this.rootConHandler.sendTo([to],data)
+  }
+  updateConnections(){
+    if (this.isRoot){
+      this.updateRootConnections()
+    }
+    let chat = this;
+    let rootUser = this.users.find(user=>user.name===this.rootName);
+    if(!rootUser||!rootUser.online){
+      this.rootFailureProtocol(true);
+      return;
+    }
+
+
+
+    let meNode = this.conTree.find(this.myName);
+    if(meNode){
+      let parent = meNode.parentID()
+      let awaitFrom;
+      if (parent) awaitFrom = [parent] 
+      else awaitFrom = []
+      let children = meNode.childrenIDs()
+      this.conHandler.setNecessaryConnections(children.map((childName)=>chat.peerIDFromName(childName)),awaitFrom.map((childName)=>chat.peerIDFromName(childName)))
+    }
+    chat.save()
+  }
+  updateRootConnections(){
+    let chat = this;
+    let userIDs = this.users.filter((u)=>u.online===true).map((u)=>this.peerIDFromName(u.name))
+    this.rootConHandler.setNecessaryConnections([],userIDs)
+  }
+
+  handleCommandToAdmin(from,data){
+    console.log("handleCommandToAdmin:")
+    console.log(from, data)
+    let [uState,u] = this.conIsLegalForAdmin(from);
+    console.log(uState,u)
+    let chat = this;
+    if(uState ==="online"){
+        switch (data.command) {
+            case 'ASKDAT':
+                let chatData ={"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(),"admin":chat.adminName,"root":chat.rootName};
+                chat.sendAsRoot(chatData,from)
+                break;
+            case 'USRLOS':
+                console.log("User lost!");
+                if(this.rootConHandler.cons.has(data.name)&&this.rootConHandler.cons.get(data.name).state!=="Off"){
+                  let chatData ={"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(),"admin":chat.adminName,"root":chat.rootName};
+                  chat.sendAsRoot(chatData,from)
+                }else{
+                  //let message ={'date':new Date().getTime(),'message':data.name+' logged out.'};
+                  //mainEvents.emit('renderer:chatEvent',message);
+                  //chat.logs.push(message);
+  
+                  chat.sendAllRoot({"command":'LOGOUT',"name":data.name});
+                }
+                break;
+            case 'USRKEY':
+              this.sendAllRoot({'command':"KEYCHG",'name':from,'puKey':data.puKey})
+              break;
+            default:
+              if(!chat.handleEmoteCommand(from,trueFrom,data))
+                chat.handleFileCommand(from,chat.nameFromPeerID(from),data,2)
+
+                //console.log("Unhandled command at admincon to "+from+".");
+        }
+    }else{
+        if(data.command==="USRDAT"){
+            let message;
+            
+            if((uState === "unregistered" || !uState) ){
+              if( chat.pass===data.pass){
+                u=new user(1,chat.nameFromPeerID(from),importKey(data.puKey),true);
+                chat.addUser(u);
+                message={"command":'NEWUSR',"role":u.role,"name":u.name,"puKey":u.puKey};
+              }else{
+                this.sendAsRoot({"command":"BADLOG",from})
+                this.rootConHandler.removeCon(from);
+                return;
+              }
+
+            }
+            if(uState === "offline"){
+              if(chat.pass===data.pass){
+                u.puKey=importKey(data.puKey)
+                chat.login(u.name);
+                message={"command":'LOGINN',"name":chat.nameFromPeerID(from)};
+              }else{
+                  //this.sendAsRoot({"command":"BADLOG"},from)
+                  //this.rootConHandler.removeCon(from);
+                  return;
+                }
+            }
+            let chatData ={"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(),"admin":chat.adminName,"root":chat.rootName};
+            console.log("ASKDATA RECEIVED. Sending")
+            this.sendAsRoot(chatData,from)
+            this.sendAllRoot(message);
+            this.updateConnections();
+
+            //chat.updateConnections();
+        }else{
+          console.log("BAD MESSAGE")
+            //chat.sendAsRoot({"command":'ERR','message':'Bad Login.'},from)
+            //con.close();
+        }
+    }
+
+  }
+  handleCommandFromAdmin(data){
+    console.log("handleCommandFromAdmin:")
+    console.log(data)
+    let chat=this;
+    switch (data.command) {
+          case 'LOGINN':
+            chat.login(data.name);
+
+            chat.updateConnections()
+            //chat.sendAllRoot(data);
+            break;
+        case 'NEWUSR':
+
+            let u = new user(data.role,data.name,data.puKey,true);
+            if(!chat.addUser(u)){
+              chat.findUser(data.name).puKey=data.puKey;
+            }
+
+            chat.updateConnections()
+            //chat.sendAllRoot(data);
+            break;
+        case 'LOGOUT':
+
+            chat.logout(data.name);
+
+            chat.updateConnections()
+            //chat.sendAllRoot(data);
+            break;
+        case 'CYPHER':
+          console.log("cypher received");
+          this.adminPuKey=data.puKey;
+        case 'GIVDAT':
+            //console.log(data.tree)
+            chat.conTree.fromObject(data.tree);
+            chat.usersFromObject(data.users);
+            chat.adminName=data.admin;
+            chat.rootName=data.root;
+            chat.updateConnections();
+            break;
+        case 'UPTCON':
+            this.sendRoot({"command":'ASKDAT'});
+            break;
+        case 'KEYCHG':
+            this.findUser(data.name).puKey=data.puKey;
+            break;  
+        case 'DUPCON':
+            break;
+        default:
+          if(!chat.handleEmoteCommand(chat.rootName,chat.rootName,data))
+            chat.handleFileCommand(chat.rootName,chat.rootName,data,1)
+    }
+  }
+  displayUsers(){
+    var table = document.createElement('TABLE');
+    table.border = '1';
+  
+    var tableBody = document.createElement('TBODY');
+    table.appendChild(tableBody);
+  
+    var tr = document.createElement('TR');
+    tableBody.appendChild(tr);
+    let names = ["Name:","Role:","Public key:","Online:"]
+    let value = ["name","role","puKey","online"]
+    for (var j = 0; j < names.length; j++) {
+      var td = document.createElement('TD');
+      td.width = '75';
+      td.appendChild(document.createTextNode(names[j]));
+      tr.appendChild(td);
+    }
+
+    this.users.forEach(function(user){
+      var tr = document.createElement('TR');
+      tableBody.appendChild(tr);
+  
+      for (var j = 0; j < names.length; j++) {
+        var td = document.createElement('TD');
+        td.width = '75';
+        td.appendChild(document.createTextNode(user[value[j]]));
+        tr.appendChild(td);
+      }
+    })
+
+    return table
+  }
+
+  rootFailureProtocol(forced = true,attempt = 1){
     this.onSuddenClose()
     this.close()
-   /*let chat = this;
-   let conUses = this.conTree.nodeLayeredList()
-   console.log("Beginning root failure protocol.")
-    if((!chat.conHandler.rootCon||chat.conHandler.rootCon==="Off")&&attempt<conUses.length){
-      let p = new Promise(function(myResolve, myReject) {
+    this.onSuddenClose()
+    this.close()
+    let chat = this;
 
-        
-        if (!chat.rootCommunicator){
-          chat.rootCommunicator = new EventEmitter();
-        }
-        if(chat.myName===conUses[attempt]){
-          chat.setupRootComs(function(){
-            console.log("Error creating new root peer, retrying to set up connection to root.")
-            myResolve();
-          });
-          chat.rootConHandler = new ConHandler(preChat+chat.name,undefined,function(){
-            console.log("Success creating new root peer, retrying to set up connection to root.")
-            if(chat.rootName!=chat.myName&&chat.rootConHandler.peer.id){
-              chat.isRoot=true;
-              //chat.conTree.makeNewRoot(chat.myName);
-              chat.logout(chat.rootName);
-              chat.rootName= chat.myName;
-              if(forced)
-                chat.rootConHandler.setNecessaryConnections(chat.users.map(v=>v.name),[]);
-            }
-            myResolve();
-          },chat.rootCommunicator)
-          ///Try to become root
-        }else{
-          myResolve();
-        }
 
-      });
-      let p2 = new Promise(function(myResolve, myReject) {
-        chat.conHandler.restartRootCon(myResolve)
-      })
-      await sleep(1000).then(()=>p()).then(() =>p2()).then(()=>rootFailureProtocol(forced,attempt+1))
-      
-        ///Try to connect to root
-        //acktually no need since forced will be default
-    }*/
+   /* console.log("Beginning root failure protocol.")
+    if(this.isRoot&&!forced){
+      this.updateConnections();
+      return;
+    }
+    if (!chat.rootCommunicator){
+      chat.rootCommunicator = new EventEmitter();
+          
+    chat.setupRootComs(function(){
+      console.log("Error creating new root peer, retrying to set up connection to root.")
+      chat.normalCommunicator.emit("resetUpRootCon")
+    });
+      //chat.rootCommunicator.removeAllListeners();
+   }
+
+    chat.rootConHandler = new ConHandler(preChat+chat.name,undefined,function(){
+      console.log("Success creating new root peer, retrying to set up connection to root.")
+      if(chat.rootName!=chat.myName&&chat.rootConHandler.peer.id){
+        chat.isRoot=true;
+        //chat.conTree.makeNewRoot(chat.myName);
+        chat.logout(chat.rootName);
+        chat.rootName= chat.myName;
+        if(forced)
+          chat.rootConHandler.setNecessaryConnections(chat.users.map(v=>v.name),[]);
+      }
+      chat.normalCommunicator.emit("resetUpRootCon")
+    },chat.rootCommunicator)
+    */
+    /*console.log("Beginning root failure protocol.")
+    if(this.isRoot&&!forced){
+      this.updateConnections();
+      return;
+    }
+    if (!chat.rootCommunicator){
+      chat.rootCommunicator = new EventEmitter();
+          
+    chat.setupRootComs(function(){
+      console.log("Error creating new root peer, retrying to set up connection to root.")
+      chat.normalCommunicator.emit("resetUpRootCon")
+    });
+      chat.rootCommunicator.removeAllListeners();
+   }
+
+    chat.rootConHandler = new ConHandler(preChat+chat.name,undefined,function(){
+      console.log("Success creating new root peer, retrying to set up connection to root.")
+      if(chat.rootName!=chat.myName&&chat.rootConHandler.peer.id){
+        chat.isRoot=true;
+        //chat.conTree.makeNewRoot(chat.myName);
+        chat.logout(chat.rootName);
+        chat.rootName= chat.myName;
+        if(forced)
+          chat.rootConHandler.setNecessaryConnections(chat.users.map(v=>v.name),[]);
+      }
+      chat.normalCommunicator.emit("resetUpRootCon")
+    },chat.rootCommunicator)
 
   
-
+*/
       //chat.rootCommunicator.removeAllListeners();
    }
 ////STORAGE AREA
-shareFiles(fileArray){
-  let chat = this;
-  Array.from(fileArray).forEach(file=>{
-    let name = chat.makeFileLink(file)
-    chat.shareFileLink(name);
-  })
-}
-  loadAndSendFile(filename,username){
+  shareFiles(fileArray){
     let chat = this;
-    if (this.fileLinks.has(!filename)){
+    Array.from(fileArray).forEach(file=>{
+      let name = null;
+      try{
+        name = chat.makeFileLink(file)
+        chat.shareFileLink(name);
+      }catch(e){
+        console.log("Removed inputted file due to error.")
+        console.log(e)
+        if (name){
+          chat.fileLinks.delete(name)
+        }
+      } 
+    })
+  }
+  /**
+   * Loads file from the file link database using it's nickname and begins its transfer to another user.
+   * @param {String} filename nickname of the file, might be changed if necessary.
+   * @param {String} username username (also accepts peerIds)
+   * @param {Number} comMode 0 (default) => sends as normal. 1 => sends TO root, 2 => sends FROM root to the user.
+   */
+  loadAndSendFile(filename,username,comMode = 0){
+    let chat = this;
+    let sendF
+
+    if (!filename||filename!=="logs"&&!this.fileLinks.has(filename)){
       return false;
     }else{
-      let link = this.fileLinks.get(filename);
-      let readStream = fs.createReadStream(link.path,{ highWaterMark: 1 * 1024, encoding: 'binary' });
-      readStream.on('data', function(chunk) {
-        chat.sendNotEncoded({"command":"FILDAT","filename":filename,"chunk":chunk},username)
+      if(comMode===0)
+        sendF = function(data,to){
+          chat.sendNotEncoded(data,to)
+        }
+      else if (comMode ===1) 
+        sendF  = function(data,to){
+          chat.sendRoot(data)
+        }
+      else
+        sendF  = function(data,to){
+          chat.sendAsRoot(data,to)
+        }
+
+      let link
+      if(filename==="logs"){
+        filename = filename
+        chat.fileTransfers.push({
+          peer: username,
+          action: "s",
+          file: filename
+        })
+        this.saveLogs();
+        link = {
+          path: path.join('.', 'UserData', this.myName,this.name,'logs.json'),
+          date:Date.now(),
+          type:"logs",
+          size:fs.statSync(path.join('.', 'UserData', this.myName,this.name,'logs.json')).fileSizeInBytes
+        }
+
+      }else{
+        filename = chat.myName+":"+filename
+        chat.fileTransfers.push({
+          peer: username,
+          action: "s",
+          file: filename
+        })
+        link = this.fileLinks.get(filename);
+      }
+      let readStream = fs.createReadStream(link.path,{ highWaterMark: 1  * 1024, encoding: 'binary' });
+      chat.fileTransfers.push({
+        peer: username,
+        action: "s",
+        file: filename,
+        stream: readStream
+      })
+      readStream.on('readable', async function() {
+        // There is some data to read now.
+        let chunk;
+        let transfer = chat.fileTransfers.find(t=>t.peer=username&&t.action==="s"&&t.file===filename)
+        let step = 0;
+        while ((chunk = this.read()) !== null&&step<10) {
+          step++
+          if(!transfer){
+            if(!readStream.destroyed)
+              readStream.destroy()
+            chat.fileTransfers.splice(chat.fileTransfers.findIndex(t=>t.peer===username&&t.action==="s"&&t.file===filename))
+            return;
+          }
+
+          sendF({"command":"FILDAT","filename":filename,"chunk":chunk},chat.peerIDFromName(username))
+          chat.ensureConStability()
+        }
       }).on('end', function() {
-        chat.sendNotEncoded({"command":"FILEND","filename":filename,"date":link.lastModified,
+        sendF({"command":"FILEND","filename":filename,"date":link.date,
         "type":link.type,
-        "size":link.size},username)
+        "size":link.size},chat.peerIDFromName(username))
       });
     }
-
   }
 //TO-DO
 /**
@@ -1010,6 +1301,11 @@ shareFiles(fileArray){
  */
   displayShareLink(trueFrom,filename,size){
     let chat=this;
+
+    if(document.getElementById("chatfile-"+filename)){
+      document.getElementById("chatfile-"+filename).outerHTML = "";
+    }
+
     console.log("Adding to chat!");
     let li=document.createElement("li");
     li.setAttribute('id',"chatfile-"+filename);
@@ -1024,7 +1320,7 @@ shareFiles(fileArray){
       button.innerHTML = "Request";
       button.setAttribute('id',"chatFileButton-file-"+filename);
       button.addEventListener ("click", function() {
-        chat.sendAll({"command":"RQFILE","filename":filename,"from":trueFrom})
+        chat.sendAll({"command":"RQFILE","filename":filename})
         
         button.disabled=true;
         button.innerHTML = "Requesting...";
@@ -1039,7 +1335,10 @@ shareFiles(fileArray){
   }
   displayFile(filename){
     let file = this.fileLinks.get(filename);
-    if(!file)return;
+    if(!file){
+      console.log("File "+filename+" not found.")
+      return;
+    }
     if(file.from!==this.myName)
       document.getElementById("chatFileButton-file-"+filename).innerHTML = "Downloaded"
 
@@ -1070,6 +1369,8 @@ shareFiles(fileArray){
     let file = this.fileLinks.get(name)
     if(!file){
       displayGeneralError("File not found.")
+      console.log("ERROR FOUND")
+      return;
     }
     this.sendAll({
       "command":"SHLINK",
@@ -1170,6 +1471,10 @@ shareFiles(fileArray){
       }
     });
   }
+  saveLogs(){
+    let fName = path.join('.', 'UserData', this.myName,this.name,'logs.json');
+    fs.writeFileSync(fName, this.stringifyLogs());
+  }
   stringifyLogs(){
     return JSON.stringify(this.logs.filter(log=>log.from))
   }
@@ -1226,11 +1531,13 @@ shareFiles(fileArray){
         "size":linkObject.size,
         "from":linkObject.from
       });
+      console.log("Link to "+linkObject.name+" loaded:")
+      console.log(this.fileLinks.get(linkObject.name))
       return linkObject.name
   }
   linksToObjects(){
     let linkList=[]
-    this.fileLinks.forEach((data,name)=>function(){
+    this.fileLinks.forEach((data,name)=>
       linkList.push({
         name:name,
         path:data.path,
@@ -1239,24 +1546,69 @@ shareFiles(fileArray){
         size:data.size,
         from:data.from
       })
-    })
+    )
     return linkList;
   }
-
+  /**
+   * Adds a log array to the current logs, mixing them in correct date order and removing duplicates.
+   * @param {Array} logs 
+   * @returns 
+   */
   logsFromObject(logs){
+    let addedSomething = false;
     if(this.logs.length===0){
       this.logs=logs;
-      return;
+      return false;
     }
     if(logs.length===0){
-      return;
+      return false;
     }
     if(logs[logs.length-1].date<this.logs[0].date){
       this.logs=logs.concat(this.logs);
-    }else{
+      return true;
+    }else if(this.logs[this.logs.length-1].date<logs[0].date){
       this.logs=this.logs.concat(logs);
+      return true;
+    }else{
+      let finalLog = []
+      let i = 0;
+      let j = 0;
+      console.log(this.logs.length)
+      console.log(logs.length)
+      while(i<this.logs.length&&j<logs.length){
+        console.log(i)
+        console.log(this.logs[i])
+        console.log(j)
+        console.log(logs[j])
+        if(deepEqual(this.logs[i],logs[j])){
+          finalLog.push(this.logs[i])
+          i++
+          j++
+        }else 
+          if(this.logs[i].date<logs[j].date){
+            finalLog.push(this.logs[i])
+            i++
+          }else
+          if(this.logs[i].date>logs[j].date){
+            finalLog.push(logs[j])
+            j++
+            addedSomething=true;
+        }else{
+          finalLog.push(this.logs[i])
+          finalLog.push(logs[j])
+          i++
+          j++
+        }
+      }
+      if(i === this.logs.length){
+        finalLog.concat(logs.slice(j,logs))
+        addedSomething=true;
+      }else{
+        finalLog.concat(this.logs.slice(i,this.logs))
+      }
+      this.logs=finalLog
     }
-    console.log(this.logs)
+    return addedSomething
     
   }
   usersFromObject(usersObjects,outer=true){
@@ -1322,13 +1674,13 @@ shareFiles(fileArray){
               action: "s",
               file: filename
         })
-        chat.send({
+        chat.sendNotEncoded({
           "command":"OFFERF", "filename":filename
         },chat.peerIDFromName(to))
       });
 
     }else
-    chat.send({
+    chat.sendNotEncoded({
       "command":"OFFERF", "filename":filename
     },chat.peerIDFromName(to))
 
@@ -1636,12 +1988,8 @@ function addElementToChat(e){
   document.getElementById("chatBox").appendChild(e);
 }
 function addToChat(message){
-  console.log("Adding to chat!");
-  console.log(message)
-
     let li=document.createElement("li");
     li.setAttribute('id',message.id);
-    console.log(message);
     let time = new Date(message.date);
     let messageDate = document.createTextNode(''+time.getHours()+':'+time.getMinutes()+' ');
     let name=document.createElement("b").appendChild(document.createTextNode(message.from));
@@ -1829,13 +2177,10 @@ mainEvents.on('renderer:messageRcv', function (data)  {
   let m = new Message(data.user,data.date,data.message);   
   addToChat(m);
 });
-mainEvents.on('renderer:switched', function (data)  {
+function resetChat(logs){
   let i=0;
   document.getElementById("chatBox").textContent='';
-  document.getElementById("chatName").textContent=data.chat;
-  console.log(data.logs);
-  //myID=0;
-  data.logs.forEach(function(item){
+  logs.forEach(function(item){
     console.log(item)
     if(item.from){
       if(item.file){
@@ -1852,6 +2197,13 @@ mainEvents.on('renderer:switched', function (data)  {
       i=i+1;
     }
   });
+}
+mainEvents.on('renderer:switched', function (data)  {
+
+  document.getElementById("chatName").textContent=data.chat;
+  console.log(data.logs);
+  //myID=0;
+  resetChat(data.logs)
 });
 //mainEvents.on('renderer:anonCon', function (data)  {});  //TO-DO
 mainEvents.on('renderer:chatInvite', function (data)  {

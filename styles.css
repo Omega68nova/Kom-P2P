@@ -7,12 +7,6 @@
 #container{
  width:990px; 
 }
-.drop_zone {
-  border: 5px solid rgb(200, 200, 255);
-  background-color: rgb(146, 210, 253);
-  width: 200px;
-  height: 100px;
-}
 
 .messageSender{
  position: fixed;
@@ -25,8 +19,15 @@
  float:left;
 }
 #right{
+    display:none;
+    position: fixed;
+    top: 50px;
+    left: 7px;
+    background-color:#ffffff;
+    border: 3px solid #f1f1f1;
+    z-index: 9;
     width:600px;
- float:right;
+    float:left;
 }
 #icon{
     width:32px;
@@ -113,13 +114,15 @@ image, video, audio{
 }
 .scroller {
   overflow: auto;
-  height: 100px;
+  height: 500px;
+  width: 360px;
   display: flex;
   flex-direction: column-reverse;
   overflow-anchor: auto !important; /*  See https://developer.mozilla.org/en-US/docs/Web/CSS/overflow-anchor */
 }
 
 .scroller .scroller-content .item {
-  height: 20px;
+  height: 100px;
+
   transform: translateZ(0); /* fixes a bug in Safari iOS where the scroller doesn't update */
 }

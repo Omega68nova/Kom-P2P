@@ -36,7 +36,36 @@ class Queue {
   }
 }
 
-const PEERJS_OPTIONS = {}
+const PEERJS_OPTIONS = {    
+  
+  		//'host': "127.0.0.1",
+		//'port': 9000,
+	//	'path': "/myapp",
+  'iceServers': [
+  { 'urls': 'stun:stun.l.google.com:19302' },
+  {
+    'urls': "turn:omegachatapp.metered.live:80",
+    'username': "371bec6b38c070c460b0046f",
+    'credential': "0WiOAZKfxs9jqcLT",
+  },
+  {
+    'urls': "turn:omegachatapp.metered.live:80?transport=tcp",
+    'username': "371bec6b38c070c460b0046f",
+    'credential': "0WiOAZKfxs9jqcLT",
+  },
+  {
+    'urls': "turn:omegachatapp.metered.live:443",
+    'username': "371bec6b38c070c460b0046f",
+    'credential': "0WiOAZKfxs9jqcLT",
+  },
+  {
+    'urls': "turn:omegachatapp.metered.live:443?transport=tcp",
+    'username': "371bec6b38c070c460b0046f",
+    'credential': "0WiOAZKfxs9jqcLT",
+  }
+], 
+'sdpSemantics': 'unified-plan' 
+};
  /* { 
 		//'host': "127.0.0.1",
 		//'port': 9000,
@@ -80,11 +109,12 @@ class ConData{
  * @param {String} type Accepts the following Strings: "Normal", "Special", "ToRoot", "AsRoot"
  * @param {String} state Accepts the following Strings: "Off", "SettingUp", "Validating", "On"
  */
-    constructor(id, connection=undefined, type="Normal", state="Off") {
+    constructor(id, connection=undefined, type="Normal", state="Off",important=false) {
         let conData=this;
         this.id = id;
         this.type = type;
         this.state = state;
+        this.important=important;
         this.lastContactDate= Date.now();
         this.dataBacklog =new Queue();
         this.funcStorage = {
@@ -95,7 +125,8 @@ class ConData{
       
           },
           onError: function onError(id,err){
-            throw new Error("Function onError @ connection to ${this.id} not setup, and yet it was called... The error is this by the way:   "+err)
+            throw new Error("Function onError @ connection to "+id+" not setup, and yet it was called... The error is this by the way:   "+err)
+            
           },
           onMessageOld:null,
           onDisconnectOld:null,
@@ -113,6 +144,9 @@ class ConData{
       }else throw new Error("Connection not set yet!")
     }
     setCon(connection){
+      if(this.intervalID){
+        window.clearInterval(this.intervalID)
+      }
       //console.log("setting up connection for con: "+this.id)
 
       if (this.connection!==connection){
@@ -122,7 +156,7 @@ class ConData{
       let onData = function(data){
         conData.lastContactDate= Date.now();
         if(data.command==="PING"){
-          console.log("PINGRECEIVED")
+          //console.log("PINGRECEIVED")
           connection.send({"command":"PONG"})
           return;
         }else if(data.command==="PONG"){
@@ -163,7 +197,7 @@ class ConData{
       this.funcStorage.onErrorOld =onError;
       let  myCallback = function() {
         if(conData.state==="Off"){
-          window.clearInterval(intervalID);
+          window.clearInterval(conData.intervalID);
           return;
         }
         try{  
@@ -172,17 +206,18 @@ class ConData{
           conData.connection.close()
           console.log("Can't send message to "+conData.id)
           conData.funcStorage.onCloseOld()
-          window.clearInterval(intervalID);
+          window.clearInterval(conData.intervalID);
         }
-        if( ((Date.now()-conData.lastContactDate)/1000)>3){
+        if( ((Date.now()-conData.lastContactDate)/1000)>5){
           console.log("Connection timed out to "+conData.id)
           conData.connection.close()
-          conData.funcStorage.onCloseOld()
-          window.clearInterval(intervalID);
+          //conData.funcStorage.onCloseOld()
+          window.clearInterval(conData.intervalID);
         }
         
       }
-      var intervalID = window.setInterval(myCallback, 1000);
+      if(this.important)this.intervalID = window.setInterval(myCallback, 2000);
+      
       }
     }
     /**
@@ -220,6 +255,7 @@ class ConData{
         if(data.command==="PING"){
           try{
             conData.connection.send({"command":"PONG"})
+            return;
           }catch{
 
           }
@@ -239,7 +275,7 @@ class ConData{
           console.log("Con is not on, sending to backlog.")
           console.log(conData)
         }else{
-            console.log(conData.funcStorage.onMessage)
+            //console.log(conData.funcStorage.onMessage)
             conData.funcStorage.onMessage(conData.id,data);
         }
 
@@ -307,7 +343,6 @@ class ConHandler{
           console.log(err.type)
           if (err.type==='peer-unavailable'){
             let name = err.message.split(" ")[5];
-            console.log("it IS this one")
             conHandler.eventCommunicator.emit("failureAt",name);
           }else if(err.type==='unavailable-id'||err.type==='invalid-id'){
             console.log("Detected setup failure")
@@ -382,17 +417,24 @@ class ConHandler{
         connectTo.forEach((id)=>{
           if(!this.cons.has(id)){
             let con = this.peer.connect(id,CON_OPTIONS);
-            this.cons.set(id,new ConData(id,con,"Normal","SettingUp"));
+            this.cons.set(id,new ConData(id,con,"Normal","SettingUp",(this.rootId&&id===this.rootId)||!this.rootId));
             console.log("Creating con to: "+id)
             this.setupNormalCon(id,con);
-          }else if(this.cons.get(id).type==="Special"){
+          }else if(this.cons.get(id).state==="off"){
+            let con = this.peer.connect(id,CON_OPTIONS);
+            this.cons.get(id).type="Normal"
+            this.setupNormalCon(id,con)
+          }
+          if(this.cons.get(id).type==="Special"){
             this.cons.get(id).type="Normal"
             this.setupNormalCon(id)
           }
         })
         awaitConnectionFrom.forEach((id)=>{
           if(!this.cons.has(id)){
-            this.cons.set(id,new ConData(id,null,"Normal","Off"))
+            this.cons.set(id,new ConData(id,null,"Normal","Off",this.rootId&&id===this.rootId||!this.rootId))
+            this.checkIfConnectedIn(id,1000)
+          }if(this.cons.get(id).state==="off"){
             this.checkIfConnectedIn(id,1000)
           }else{
             this.cons.get(id).type="Normal"
@@ -401,7 +443,7 @@ class ConHandler{
       }
       createSpecialCon(id, onOpen = function(){}){
         let con = this.peer.connect(id,CON_OPTIONS);
-        this.cons.set(id,new ConData(id,con,"Special","SettingUp"));
+        this.cons.set(id,new ConData(id,con,"Special","SettingUp",this.rootId&&id===this.rootId||!this.rootId));
         console.log("Creating special con to: "+id)
 
         if(con.open){
@@ -428,7 +470,7 @@ class ConHandler{
         let cData = this.cons.get(id)
         if(!cData){
           if(con){
-            let cData= new ConData(id,con,"Special","SettingUp");
+            let cData= new ConData(id,con,"Special","SettingUp",this.rootId&&id===this.rootId||!this.rootId);
             this.cons.set(id,cData)
           }else  throw new Error("SetupNormalCon @ conHandler for con "+id+": connection list doesnt include connection and none was given.")
         }else{
@@ -466,6 +508,15 @@ class ConHandler{
         conData.state="On";
         if (forceNormal){
           conData.type="Normal"
+        }
+      }
+      resetCon(peerId){
+        let conData;
+        if(peerId ===this.rootId) conData=this.rootCon
+        else 
+          conData = this.cons.get(peerId);
+        if(conData){
+          conData.setCon(this.peer.connect(peerId,CON_OPTIONS))
         }
       }
 
@@ -546,11 +597,11 @@ class ConHandler{
         let con = this.peer.connect(this.rootId,CON_OPTIONS)
         con.on('open',function(){
           console.log("Peer "+conHandler.peer.id+" setting up RootCon phase 1-OPEN.")
-          conHandler.rootCon= new ConData(conHandler.rootId,con,"ToRoot","SettingUp");
+          conHandler.rootCon= new ConData(conHandler.rootId,con,"ToRoot","SettingUp",true);
           //if(con.open){
             conHandler.rootCon.state="Validating";
             onComplete()
-            console.log(conHandler.rootCon.id)
+            //console.log(conHandler.rootCon.id)
             conHandler.eventCommunicator.emit("validateAndFinishSetup",[conHandler.rootCon.id]);
           //}else{
           //  con.on('open',function(){
@@ -570,10 +621,10 @@ class ConHandler{
         let con = this.peer.connect(this.rootId,CON_OPTIONS)
         con.on('open',function(){
           console.log("Peer "+conHandler.peer.id+" setting up RootCon phase 1-OPEN.")
-          conHandler.rootCon= new ConData(conHandler.rootId,con,"ToRoot","SettingUp");
+          conHandler.rootCon= new ConData(conHandler.rootId,con,"ToRoot","SettingUp",true);
             conHandler.rootCon.state="Validating";
             onComplete()
-            console.log(conHandler.rootCon.id)
+            //console.log(conHandler.rootCon.id)
             conHandler.eventCommunicator.emit("validateAndFinishSetup",[conHandler.rootCon.id]);
         })
       }
@@ -590,8 +641,8 @@ class ConHandler{
         this.rootBacklog.forEach((element) => element())
       }
       sendRoot(actionObject){
-        console.log("Sending message to Root:")
-        console.log(actionObject);
+        //console.log("Sending message to Root:")
+        //console.log(actionObject);
           if (!this.rootCon) return;
           else if(this.rootCon.state==="On") {this.rootCon.send(actionObject);}
           else this.rootBacklog.push(function(){
@@ -607,11 +658,9 @@ class ConHandler{
       }
       ////////////////////////////// Normal Send methods //////////////////////////////
       secureSend(actionName,actionObject,peerId=undefined,params=[]){
-        console.log("Sending the action securely;")
-        if(peerId){
-          console.log("To "+peerId+".")
-        }
+        //console.log("Sending the action securely;")
         if (peerId){
+          //console.log("To "+peerId+".")
           let foundUser =this.cons.get(peerId)
           if (!foundUser) return;
           else if(foundUser.state==="On"||foundUser.state==="Special") this[actionName+"Inner"](actionObject,peerId,params);
@@ -663,9 +712,10 @@ class ConHandler{
       sendToInner(actionObject,targetNames){
         console.log("SentoinnerReached")
         this.cons.forEach(function(conData,name){
-          if(targetNames.includes(name))
-          console.log("sending to "+name)
+          if(targetNames.includes(name)){
+            console.log("sending to "+name)
             conData.send(actionObject);
+          }
         })
       }
 
