@@ -96,7 +96,12 @@
         }else 
           document.getElementById("right").style.display = "block";
       }
-      
+      function switchEmoteMenu() {
+        if(document.getElementById("emoteMenu").style.display==="block"){
+          document.getElementById("emoteMenu").style.display = "none";
+        }else 
+          document.getElementById("emoteMenu").style.display = "block";
+      }
       </script>
       <div id="right">
         <button onclick="switchControlPanel()">-</button>
@@ -104,17 +109,19 @@
         <button id="chatUsers"><img class = "icon" src="./img/user.png"></button>
         <button id="chatForceUpdate"><img class = "icon" src="./img/reload.png"></button>
         <button id="chatConHandler"><img class = "icon" src="./img/conHandler.png"></button>
+        <br>
         <button id="chatRQLOGS">Request old logs</button>
+        <br>
         <div id="dataDisplayArea"></div>
-        
       </div>
+
       <div id="container">
         <div  class="scroller">
           <ul class="scroller-content" id="chatBox"></ul>
         </div>
         <div id="left" class="messageSender">
           
-          <button onclick="switchFileForm()">+</button>
+          <button onclick="switchFileForm()">+</button><button onclick="switchEmoteMenu()">E</button>
           <form id="chatForm">
             <input id="chatMessageInput" placeholder="Enter your message..." autocomplete="off" required /><button type="submit" id="chatSendMessageButton">Send</button>
           </form>
@@ -128,6 +135,17 @@
               <button type="submit" class="btn">Share</button>
             </form>
             <button onclick="switchFileForm()">-</button>
+          </div>
+          <div class="form-popup" id="emoteMenu">
+            <div id="emoteList"></div>
+            <form class="form-container" id="emoteUploadForm">
+              <label for="emoteUpload"><b>Upload Emote:</b></label>
+              <input id="emoteUpload" type="file" accept="image/*" required><br>
+              <label for="emoteUpload"><b>Emote name:</b></label>
+              <input id="emoteName" pattern="([\S])*" required>
+              <button type="submit" id="chatUploadEmoteButton" class="btn">Add</button>
+            </form>
+            <button onclick="switchEmoteMenu()">-</button>
           </div>
           
           <script>

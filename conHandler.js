@@ -38,10 +38,10 @@ class Queue {
 
 const PEERJS_OPTIONS = {    
   
-  		//'host': "127.0.0.1",
-		//'port': 9000,
-	//	'path': "/myapp",
-  'iceServers': [
+  		'host': "127.0.0.1",
+		'port': 9005,
+		'path': "/myapp",
+  /*'iceServers': [
   { 'urls': 'stun:stun.l.google.com:19302' },
   {
     'urls': "turn:omegachatapp.metered.live:80",
@@ -64,7 +64,7 @@ const PEERJS_OPTIONS = {
     'credential': "0WiOAZKfxs9jqcLT",
   }
 ], 
-'sdpSemantics': 'unified-plan' 
+'sdpSemantics': 'unified-plan' */
 };
  /* { 
 		//'host': "127.0.0.1",

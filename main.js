@@ -15,7 +15,20 @@ function createWindow () {
       preload: path.join(__dirname, 'preload.js')
     }
   })
+ /* mainWindow.on('close', (e) => {
 
+    const choice = this.dialog.showMessageBox(
+      this.mainWindow,
+      {
+        type: 'question',
+        buttons: ['Yes', 'No, hang on'],
+        title: 'Confirm your actions',
+        message: 'Do you really want to close the application?'
+      }
+    );
+    console.log('CHOICE: ', choice);
+    if (choice > 0) e.preventDefault();
+  });*/
   // and load the index.html of the app.
   mainWindow.loadFile('index.html')
   try{

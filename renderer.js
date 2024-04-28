@@ -76,7 +76,7 @@ window.onload = function () {
     e.preventDefault();
     chatShowConHandlers();
   });
-  document.querySelector("#fileUploadForm").addEventListener('click', e => {
+  document.querySelector("#fileUploadForm").addEventListener('submit', e => {
     e.preventDefault();
     chatShareFile();
   });
@@ -84,18 +84,23 @@ window.onload = function () {
     e.preventDefault();
     chats.get(currentChat).sendRoot({"command":"RQLOGS"})
   });
+  document.querySelector("#emoteUploadForm").addEventListener('submit', e => {
+    e.preventDefault();
+    chatShareEmote();
+  });
   show('start');
   hide('chat');
   hide('DMs');
   hide('chatCreation');
   hide('peerServer');
-
-
-
-
+  hide('emoteMenu');
 };
-
-
+window.onbeforeunload = (e) => {
+  if(me.username)
+    saveSession(me.username)
+  //if(document.getElementById("fileUploadForm").style.display!=="block")
+    //e.returnValue = false;
+}
 
 function changeModeCC(){
   changeMode('chatCreation')
@@ -151,6 +156,7 @@ class chatData{
 
     if(isAdmin){
       this.adminName=this.myName;
+      this.rootName=this.myName;
     }
 
 
@@ -162,7 +168,7 @@ class chatData{
    
     if(isAdmin){
       this.adminName=this.myName;
-      this.rootName=this.adminName;
+      this.rootName=this.myName;
       this.rootCommunicator = new EventEmitter();
       this.setupRootComs(function(){
         displayGeneralError("Failed to Create chat, trying to log in instead.");
@@ -464,18 +470,19 @@ class chatData{
   }
 
   canUser(username,behaviour){
-    let u = this.findUser(username);
+    return true;
+    /*let u = this.findUser(username);
     if(u){
-      if(this.getBehaviourPermLevel(behaviour)>=u.role){
+      if(this.getBehaviourPermLevel(behaviour)<=u.role){
         return true;
       }
     }
-   return false;
+   return false;*/
   }
   getBehaviourPermLevel(behaviour){
     let s = this.settings.get(behaviour);
     if(s) return s;
-    return 2;
+    return 1;
   }
   conIsLegal(con){
     if(con.peer.startsWith(preChatUser+this.name+'-')){
@@ -613,6 +620,7 @@ class chatData{
               chat.conTree.fromObject(data.tree);
               chat.usersFromObject(data.users);
               chat.rootName=data.root;
+              chat.emotesFromObject(data.emotes)
               chat.adminName=data.admin;
               chat.updateConnections();
 
@@ -665,41 +673,21 @@ class chatData{
           }*/
           break;
       default:
-          if(!chat.handleEmoteCommand(from,trueFrom,data))
             chat.handleFileCommand(from,trueFrom,data)
 
 
     }
   }
-
-  setEmo(name,fileLink){
-    this.sendAllRoot({'command':'NEWEMO','name':name,'fileLink':fileLink})
-  }
-  handleEmoteCommand(from,trueFrom,data){
-  switch(data.commmand){
-    case 'NEWEMO':
-      if(trueFrom===this.rootName)
-        this.emotes.set(data.name,data.fileLink)
-        return true;
-    case'REMEMO':
-      if(trueFrom===this.rootName)
-        this.emotes.delete(data.name)
-      return true;
-    case 'OFFEMO':
-      if(this.myName===this.rootName){
-        if(!this.fileLinks.has(data.fileLink)){
-          this.send({"command":"RQFILE","filename":data.fileLink},from)
-        }
-        
-          
-      }
-
-       
-      return true;
-    default:
-      return false;
-  }
-}
+  /**
+   * A array of objects that describe transferences structured like so
+   * {
+   *    peer: username
+   *    action: "s"/"r" <== sender or receiver of the file
+   *    file: filename
+   * }
+   * This is used to close the special connection when all transfers are finished.
+   */
+  fileTransfers=[]
 /**
  * 
  * @param {*} from the id of the peer the data was received from. (peerId format)
@@ -709,6 +697,7 @@ class chatData{
  * @returns 
  */
   handleFileCommand(from,trueFrom,data,comMode=0){
+    console.log("handleFileCommand - trueFrom: "+trueFrom)
     let chat = this;
     let fPath
     let sendF
@@ -737,6 +726,7 @@ class chatData{
         chat.fileTransfers.push({
           peer: trueFrom,
           action: "r",
+          path:path.join('.', 'UserData', chat.myName,chat.name,(trueFrom+"_logs")),
           file: "logs",
           stream: fs.createWriteStream( path.join('.', 'UserData', chat.myName,chat.name,(trueFrom+"_logs")), {encoding: 'binary',flags: 'w'})
         })
@@ -764,11 +754,13 @@ class chatData{
           peer: trueFrom,
           action: "r",
           file: data.filename,
+          path:fPath,
           stream: fs.createWriteStream(fPath, {encoding: 'binary',flags: 'w'})
         })
         sendF({"command":"FOFFOK","filename":data.filename},from)
         break;
       case 'FILDAT':
+        console.log(chat.fileTransfers)
         let transfer =chat.fileTransfers.find(v=>v.file===data.filename&&v.action==="r");
 
         if(!transfer||transfer.peer!==trueFrom&&data.filename!=="logs"){
@@ -809,7 +801,7 @@ class chatData{
         break;
       case 'FDATOK':
         let chunk;
-        let transfer3 = chat.fileTransfers.find(t=>t.peer=trueFrom&&t.action==="s"&&t.file===data.filename)
+        let transfer3 = chat.fileTransfers.find(t=>t.peer===trueFrom&&t.action==="s"&&t.file===data.filename)
         let step = 0;
         while ((chunk = transfer3.stream.read()) !== null&&step<10) {
           step++
@@ -819,56 +811,179 @@ class chatData{
       case 'FILEND':
         let j = chat.fileTransfers.findIndex(v=>v.file===data.filename&&v.action==="r"&&v.peer===trueFrom)
         if(j===-1){
+          console.log("File transfer not found!")
           return;
         }
         let [transfer2]=chat.fileTransfers.splice(j);
-        try{
+        let p = transfer2.stream.path;
+
           transfer2.stream.close()
-        }catch(e){
-          console.log(e)
-        }
-        if(transfer2.file==="logs"){
-          console.log("Starting log merge.")
-          let logsPath =  path.join('.', 'UserData', chat.myName,chat.name,(trueFrom+"_logs"))
-          if (fs.existsSync(logsPath)) {
-            
-            let l = (fs.readFileSync(logsPath,{encoding:"binary"}))
-            console.log(l)
-            if(chat.logsFromObject(JSON.parse(l))){
-              resetChat(chat.logs)
+        transfer2.stream.on('finish',()=>{
+          if(transfer2.file==="logs"){
+            console.log("Starting log merge.")
+            let logsPath =  path.join('.', 'UserData', chat.myName,chat.name,(trueFrom+"_logs"))
+            if (fs.existsSync(logsPath)) {
+              
+              let l = (fs.readFileSync(logsPath,{encoding:"binary"}))
+              console.log(l)
+              if(chat.logsFromObject(JSON.parse(l))){
+                resetChat(chat.logs)
+              }
+              fs.rm(logsPath,console.log);
             }
-            fs.rm(logsPath,console.log);
+           
+          }else{
+            let d = {
+              "name":data.filename,
+              "path":p,
+              "date":data.date,
+              "type":data.type,
+              "size":data.size,
+              "from":chat.nameFromPeerID(trueFrom)
+            }
+            if(data.type==="emote"){
+              console.log("It is indeed a emote")
+              console.log(path.extname(p))
+              if(!path.extname(p).match("^\.(jpg|jpeg|png|gif)$")){
+                console.log("Not supported sadly.")
+                return;
+              }
+              //If emote exists assign link to emote
+                if(!transfer2.emoteName){
+                  this.emotes.forEach((link,emote)=>{
+                    if(data.filename===link){
+                      transfer2.emoteName=emote;
+                    }
+                    
+                  })
+                  /*
+                  while(emote=emoteList.next()!==null){
+                    console.log(emote)
+                    if(emote[1]===data.filename){
+                      transfer2.emoteName=emote[0];
+                      break;
+                    }
+                  }*/
+                  if(!transfer2.emoteName){
+                    console.log("Emote rejected. No name found for the emote.")
+                    sendF({"command":"EMOTNO","name":data.filename},from)
+                    fs.rmSync(p);
+                    return;
+                  }
+                }
+                if(chat.emotes.has(transfer2.emoteName)){
+                  chat.emotes.set(transfer2.emoteName,chat.loadLink(d,true))
+                  addEmoteToEmoteMenu(transfer2.emoteName,this.displayEmote(transfer2.emoteName))
+                  chat.updateAllEmotes(transfer2.emoteName)
+                  console.log("Emote found, adding.")
+                }else{//Create emote
+                    if(this.rootName===this.myName){
+                      console.log("Emote not found but is root, adding.")
+                      let name = chat.loadLink(d,true)
+                      chat.emotes.set(transfer2.emoteName,name)
+                      this.sendAllRoot({'command':"NEWEMO","name":transfer2.emoteName,"link":name})
+                    }
+                    console.log("Done adding.")
+                }
+            }else{
+              let name= this.loadLink(d,true)
+              chat.displayFile(name)
+              let i = chat.fileTransfers.findIndex(transfer=>transfer.peer===username&&transfer.action==="r"&&transfer.file===name);
+              if(i)
+                chat.fileTransfers.splice(i)
+            }
+   
           }
-         
-        }else{
-          let d = {
-            "name":data.filename,
-            "path":path.join('.', 'UserData', chat.myName,chat.name,'downloads',(""+data.filename).replace(':',"_")),
-            "date":data.date,
-            "type":data.type,
-            "size":data.size,
-            "from":chat.nameFromPeerID(trueFrom)
-          }
-          let name= this.loadLink(d,true)
-          chat.displayFile(name)
-        }
+        })
+
 
         break;
+      case 'NEWEMO':
+        if(trueFrom==="root"||trueFrom===this.rootName){
+          this.emotes.set(data.name,//{"name":data.name,"link":
+          data.link//}
+        )
+          console.log(this.emotes)
+          console.log(this.fileLinks)
+          console.log(this.fileTransfers)
+          addEmoteToEmoteMenu(data.name,this.displayEmote(data.name))
+        }
+          
+
+          return true;
+      case 'REMEMO':
+        if(trueFrom==="root"||trueFrom===this.rootName)
+          this.emotes.delete(data.name)
+        return true;
+      case 'OFFEMO':
+        console.log(trueFrom)
+        if((trueFrom===this.myName||(trueFrom==="root"&&this.rootName===this.myName))&&this.fileLinks.has(data.link)){
+          this.sendAllRoot({'command':'NEWEMO','name':data.name,'link':data.link})
+        }else
+          this.prepareForEmote(trueFrom,from,data.name,data.link,sendF)
+        return true;
+      case 'EMOTOK':
+        console.log("Beginning to send emote.")
+        this.loadAndSendFile(data.link,trueFrom,comMode)
+
+        return true;
+      case 'EMOTNO':
+        displayGeneralError("Emote rejected: "+data.name)
+        return true;
       default:
         return false;
     }
     return true;
   }
-  /**
-   * A array of objects that describe transferences structured like so
-   * {
-   *    peer: username
-   *    action: "s"/"r" <== sender or receiver of the file
-   *    file: filename
-   * }
-   * This is used to close the special connection when all transfers are finished.
-   */
-  fileTransfers=[]
+  prepareForEmote(trueFrom,from,name,link,sendF){
+    let chat = this;
+    let f = {
+      peer: trueFrom,
+      action: "r",
+      file: link,
+      emoteName:name,
+      stream: null
+    }
+    f.peer=trueFrom;
+    console.log(trueFrom)
+    if(this.myName===this.rootName||this.emotes.has(data.name)){
+      //if(this.canUser(trueFrom,"OFFEMO")){
+        if(chat.fileTransfers.find(v=>v.file===link)){
+          sendF({"command":"EMOTNO","filename":name},from)
+          console.log("File already being transfered.")
+          return;
+        }
+
+        let emotefolder = path.join('.', 'UserData', chat.myName,chat.name,'Emotes');
+        let ePath = path.join('.', 'UserData', chat.myName,chat.name,'Emotes',link);
+
+        if(!fs.existsSync(emotefolder)){
+          fs.mkdirSync(emotefolder)
+        }
+        f.stream= fs.createWriteStream(ePath, {encoding: 'binary',flags: 'w'})
+        console.log(f)
+        this.fileTransfers.push(f)
+
+
+        console.log(this.fileTransfers)
+        sendF({"command":"EMOTOK","link":link},from)
+      //}else{
+        //sendF({"command":"EMOTNO","name":data.name},from)
+      //}          
+    }
+  }
+  sendMessage(content){
+    let data={
+          "from":this.myName,
+          "command":"SNDMES",
+          "date":content.date,
+          "message":content.message
+    };
+    console.log('Sending message:', content.message);
+    this.logs.push({'from':data.from,'date':data.date,'message':data.message});
+    this.sendAll(data);
+  }
+
   async handleFarCommand(from,data){
     //Nothing here yet
   
@@ -972,13 +1087,13 @@ class chatData{
     if(uState ==="online"){
         switch (data.command) {
             case 'ASKDAT':
-                let chatData ={"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(),"admin":chat.adminName,"root":chat.rootName};
+                let chatData ={"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(),"emotes": chat.emotesToObject(),"admin":chat.adminName,"root":chat.rootName};
                 chat.sendAsRoot(chatData,from)
                 break;
             case 'USRLOS':
                 console.log("User lost!");
                 if(this.rootConHandler.cons.has(data.name)&&this.rootConHandler.cons.get(data.name).state!=="Off"){
-                  let chatData ={"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(),"admin":chat.adminName,"root":chat.rootName};
+                  let chatData ={"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(),"emotes": chat.emotesToObject(),"admin":chat.adminName,"root":chat.rootName};
                   chat.sendAsRoot(chatData,from)
                 }else{
                   //let message ={'date':new Date().getTime(),'message':data.name+' logged out.'};
@@ -991,20 +1106,25 @@ class chatData{
             case 'USRKEY':
               this.sendAllRoot({'command':"KEYCHG",'name':from,'puKey':data.puKey})
               break;
+            case 'USRDAT':
+                let chatData2 ={"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(),"emotes": chat.emotesToObject(),"admin":chat.adminName,"root":chat.rootName};
+                console.log("ASKDATA RECEIVED. Sending")
+                this.sendAsRoot(chatData2,from)
+              break;
             default:
-              if(!chat.handleEmoteCommand(from,trueFrom,data))
                 chat.handleFileCommand(from,chat.nameFromPeerID(from),data,2)
 
                 //console.log("Unhandled command at admincon to "+from+".");
         }
-    }else{
+    }else
         if(data.command==="USRDAT"){
             let message;
             
             if((uState === "unregistered" || !uState) ){
               if( chat.pass===data.pass){
+                console.log(from)
                 u=new user(1,chat.nameFromPeerID(from),importKey(data.puKey),true);
-                chat.addUser(u);
+                console.log(u)
                 message={"command":'NEWUSR',"role":u.role,"name":u.name,"puKey":u.puKey};
               }else{
                 this.sendAsRoot({"command":"BADLOG",from})
@@ -1024,10 +1144,13 @@ class chatData{
                   return;
                 }
             }
-            let chatData ={"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(),"admin":chat.adminName,"root":chat.rootName};
+            let chatData ={"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(),"emotes": chat.emotesToObject(),"admin":chat.adminName,"root":chat.rootName};
             console.log("ASKDATA RECEIVED. Sending")
             this.sendAsRoot(chatData,from)
-            this.sendAllRoot(message);
+            if(message){
+              this.sendAllRoot(message);
+            }
+            
             this.updateConnections();
 
             //chat.updateConnections();
@@ -1036,7 +1159,7 @@ class chatData{
             //chat.sendAsRoot({"command":'ERR','message':'Bad Login.'},from)
             //con.close();
         }
-    }
+    
 
   }
   handleCommandFromAdmin(data){
@@ -1076,6 +1199,7 @@ class chatData{
             chat.usersFromObject(data.users);
             chat.adminName=data.admin;
             chat.rootName=data.root;
+            chat.emotesFromObject(data.emotes)
             chat.updateConnections();
             break;
         case 'UPTCON':
@@ -1087,8 +1211,7 @@ class chatData{
         case 'DUPCON':
             break;
         default:
-          if(!chat.handleEmoteCommand(chat.rootName,chat.rootName,data))
-            chat.handleFileCommand(chat.rootName,chat.rootName,data,1)
+            chat.handleFileCommand(chat.rootName,"root",data,1)
     }
   }
   displayUsers(){
@@ -1125,6 +1248,8 @@ class chatData{
   }
 
   rootFailureProtocol(forced = true,attempt = 1){
+    console.log("Beginning root failure protocol.")
+    //throw new Error()
     this.onSuddenClose()
     this.close()
     this.onSuddenClose()
@@ -1219,9 +1344,10 @@ class chatData{
     let chat = this;
     let sendF
 
-    if (!filename||filename!=="logs"&&!this.fileLinks.has(filename)){
+    if (!filename||!(this.fileLinks.has(filename)||filename==="logs")){
       return false;
     }else{
+     
       if(comMode===0)
         sendF = function(data,to){
           chat.sendNotEncoded(data,to)
@@ -1243,7 +1369,7 @@ class chatData{
           action: "s",
           file: filename
         })
-        this.saveLogs();
+        chat.saveLogs();
         link = {
           path: path.join('.', 'UserData', this.myName,this.name,'logs.json'),
           date:Date.now(),
@@ -1252,14 +1378,19 @@ class chatData{
         }
 
       }else{
-        filename = chat.myName+":"+filename
-        chat.fileTransfers.push({
+        //if(!filename.startsWith(chat.myName+":")){
+        //  filename = chat.myName+":"+filename
+        //}
+        /*chat.fileTransfers.push({
           peer: username,
           action: "s",
           file: filename
-        })
+        })*/
         link = this.fileLinks.get(filename);
       }
+      console.log(filename)
+      console.log(this.fileLinks)
+      console.log(link)
       let readStream = fs.createReadStream(link.path,{ highWaterMark: 1  * 1024, encoding: 'binary' });
       chat.fileTransfers.push({
         peer: username,
@@ -1270,7 +1401,7 @@ class chatData{
       readStream.on('readable', async function() {
         // There is some data to read now.
         let chunk;
-        let transfer = chat.fileTransfers.find(t=>t.peer=username&&t.action==="s"&&t.file===filename)
+        let transfer = chat.fileTransfers.find(t=>t.peer===username&&t.action==="s"&&t.file===filename)
         let step = 0;
         while ((chunk = this.read()) !== null&&step<10) {
           step++
@@ -1288,6 +1419,9 @@ class chatData{
         sendF({"command":"FILEND","filename":filename,"date":link.date,
         "type":link.type,
         "size":link.size},chat.peerIDFromName(username))
+        let i = chat.fileTransfers.findIndex(transfer=>transfer.peer===username&&transfer.action==="s"&&transfer.file===filename);
+        if(i)
+          chat.fileTransfers.splice(i)
       });
     }
   }
@@ -1421,6 +1555,15 @@ class chatData{
 
     return objects;
   }
+  emotesToObject(){
+    let emoteArray=[]
+    this.emotes.forEach((link,name)=>emoteArray.push({"name":name,"link":link}))
+    return emoteArray;
+  }
+  emotesFromObject(objectArray){
+    let chat = this;
+    objectArray.forEach(object=>chat.emotes.set(object.name,object.link))
+  }
   async save(){
     /*(async () => {
       const db = await open({
@@ -1440,6 +1583,14 @@ class chatData{
     }
     fName = path.join('.', 'UserData', this.myName,this.name,'users.json');
     fs.writeFile(fName, JSON.stringify(this.usersToObject()), err => {
+      if (err) {
+        console.error(err);
+      } else {
+        // file written successfully
+      }
+    });
+    fName = path.join('.', 'UserData', this.myName,this.name,'emotes.json');
+    fs.writeFile(fName, JSON.stringify(this.emotesToObject()), err => {
       if (err) {
         console.error(err);
       } else {
@@ -1482,6 +1633,7 @@ class chatData{
     let folderPath = path.join('.', 'UserData', this.myName,this.name);
     let usersPath = path.join('.', 'UserData', this.myName,this.name,'users.json');
     let logsPath = path.join('.', 'UserData', this.myName,this.name,'logs.json');
+    let emotesPath = path.join('.', 'UserData', this.myName,this.name,'emotes.json');
     let configPath = path.join('.', 'UserData', this.myName,this.name,'config.json');
     let linkPath = path.join('.', 'UserData', this.myName,this.name,'linkPaths.json');
     if (!fs.existsSync(folderPath)) {
@@ -1496,9 +1648,14 @@ class chatData{
     if (fs.existsSync(usersPath)) {
       this.usersFromObject(JSON.parse(fs.readFileSync(usersPath,{encoding:"ascii"})),false)
     }
+    if (fs.existsSync(emotesPath)) {
+      this.emotesFromObject(JSON.parse(fs.readFileSync(emotesPath,{encoding:"ascii"})))
+    }
     if (fs.existsSync(logsPath)) {
       this.logsFromObject(JSON.parse(fs.readFileSync(logsPath,{encoding:"ascii"})))
     }
+
+
 
 
   }
@@ -1555,6 +1712,8 @@ class chatData{
    * @returns 
    */
   logsFromObject(logs){
+    console.log(this.logs)
+    console.log(logs)
     let addedSomething = false;
     if(this.logs.length===0){
       this.logs=logs;
@@ -1601,10 +1760,10 @@ class chatData{
         }
       }
       if(i === this.logs.length){
-        finalLog.concat(logs.slice(j,logs))
+        finalLog.concat(logs.slice(j))
         addedSomething=true;
       }else{
-        finalLog.concat(this.logs.slice(i,this.logs))
+        finalLog.concat(this.logs.slice(i))
       }
       this.logs=finalLog
     }
@@ -1685,6 +1844,120 @@ class chatData{
     },chat.peerIDFromName(to))
 
   }
+  loadEmoteList(){
+    let emoteList = document.getElementById("emoteList")
+    emoteList.innerHTML=""
+    this.emotes.forEach((value,key)=>{
+      emoteList.appendChild(this.displayEmote(key))
+    })
+  }
+  /////////////////////////EMOTE FUNCTIONS
+  setupEmoteButton(keyword){
+    let chat = this;
+    let button = document.createElement("button");
+    button.innerHTML = keyword;
+    button.classList.add("emote")
+    button.classList.add("emote_"+keyword)
+    button.addEventListener ("click", function() {
+      chat.sendAll({"command":"RQFILE","filename":chat.emotes.get(keyword)})
+      button.innerHTML = "Requesting...";
+    });
+    return button;
+  }
+  setupEmoteImg(keyword){
+    let link = this.fileLinks.get(this.emotes.get(keyword))
+    let img = document.createElement('img');
+    img.classList.add("emote")
+    img.classList.add("emote_"+keyword)
+    img.src = link.path;
+    img.addEventListener('click',function(){
+      document.getElementById("chatMessageInput").value+=":"+keyword+":"
+    })
+    return img;
+  }
+  setupEmoteText(keyword){
+    let p = document.createElement("p")
+    p.classList.add("emote")
+    p.classList.add("emote_"+keyword)
+    p.innerText=":"+keyword+":"
+    return p;
+  }
+/**
+ * 
+ * @param {String} keyword the keyword of the emote
+ * @param {Node?} e the element if it needs to be replaced
+ * @returns the new element. (Note: it will also replace the old element if its given in e)
+ */
+  displayEmote(keyword, e=null){
+    let chat = this;
+    if(this.emotes.has(keyword)){//emote exists in database and...
+      let link = this.fileLinks.get(this.emotes.get(keyword))
+
+      if(e===null||!e){
+        if(link){
+          e = this.setupEmoteImg(keyword)
+        }else{
+          e = this.setupEmoteButton(keyword)
+        }
+        //document.getElementById("emoteList").appendChild(e)
+        return e;
+      }else{
+        if(e.tagName==="IMG"){//Is a image
+          if(!link){
+            let a = this.setupEmoteButton(keyword)
+            e.parentNode.replaceChild(a,e)
+            return a
+          }
+        }else{//its not.
+          if(link){
+            let a =this.setupEmoteImg(keyword)
+            e.parentNode.replaceChild(a,e)
+            return a
+          }
+        }
+      }
+    }else{//emote doesnt exist, so draw as text
+      if(e!==null){
+        let a = this.setupEmoteText(keyword)
+        e.parentNode.replaceChild(a,e)
+        return a
+
+      }else{
+        return this.setupEmoteText(keyword);
+      }
+      
+    }
+  }
+  /**
+   * Checks the whole document and replaces instances of the emote if necesary (both the emote menu button and all instances of it in chat).
+   * @param {String?} keyword the name of the emote, leave empty to update all emotes.
+   */
+  updateAllEmotes(keyword=undefined){
+    let elements
+    let chat = this;
+    if(!keyword){
+      elements = document.getElementsByClassName("emote")
+      Array.from(elements).forEach((element) => {
+        keyword=(""+element.classList[1]).replace("emote_","")
+        chat.displayEmote(keyword,element)
+      });
+    }
+    else{
+      elements = document.getElementsByClassName("emote_"+keyword)
+      Array.from(elements).forEach((element) => {
+        chat.displayEmote(keyword,element)
+      });
+    }
+      
+
+  }
+  shareEmote(name,selectedFile){
+    selectedFile.type="emote";
+    console.log("selectedFile")
+    console.log(selectedFile)
+    let link = this.makeFileLink(selectedFile)
+    this.sendRoot({'command':"OFFEMO","name":name,"link":link})
+  }
   ////OTHER
   /**
    * Closes all connections, basically making the chat dead.
@@ -1707,17 +1980,28 @@ class chatData{
     }
 }
 
-// Stores public data of each user.
+// 
 // id: number assigned to user in order of joining
 // role: 0 =admin, 1=mod, 2=user, 3= requesting
+/**
+ * Stores public data of each user. Has the parameters role, used to diferentiate user privilege levels, a name, a public key for message validation and whether it's online or not.
+ */
 class user{
-  constructor(role,username,puKey,online=true){
-    this.role=role;
-    this.name=username;
-    this.puKey=puKey;
-    this.online=online;
+  /**
+   * Creatues a user from the following parameters:
+   * @param {Number} role Used to check if the user has permissions to do certain actions in the chat according to its protocol. Usually: 0 = admin, 1 = moderator, 2 = user, 3 = requesting to join. 
+   * @param {String} name The name of the user.
+   * @param {String} puKey The public key of the user, used for crypto, mainly for message validation so there is no impersonations.
+   * @param {Boolean} online Whether the user is online or not.
+   */
+
+    constructor(role,name,puKey,online=true){
+      this.role=role;
+      this.name=name;
+      this.puKey=puKey;
+      this.online=online;
+    }
   }
-}
 
 
 /////////////////////////////////////////////
@@ -1735,7 +2019,9 @@ class user{
 function setupUser(username,settings){
   me.username=username;
   //me.password=password;
-
+  if(!settings){
+    settings = {}
+  }
   [me.prKey,me.puKey]=generateKeys();
   //console.log(me)
   //let a = sign("hello",  me.prKey, username, password)//, me.username,me.password)
@@ -1763,16 +2049,22 @@ function setupUser(username,settings){
     con.on('data', function(data) {
       console.log("Data received at user con: "+data.command);
       if(data.command==="INVCHT"){
-        mainEvents.emit('renderer:chatInvite',{'user':sender,'to':data.chatId,pass:data.pass});
+        me.dmLogs.push({command:"/invite",args:[sender,data.date,data.chatId,data.pass,false]})
+        displayInvite(sender,data.date,data.chatId,data.pass,false);
       }
       // TO-DO: cyphering of DMs
       if(data.command==="DM"){
         
-        mainEvents.emit('renderer:dm',{'user':sender,'date':data.date,'message':data.message});
+        //mainEvents.emit('renderer:dm',{'user':sender,'date':data.date,'message':data.message});
+        me.dmLogs.push({command:"/dm",args:[sender,me.username,data.message,data.date]})
+        displayDm(sender,me.username,data.message,data.date)
+        
+        
       }
     });
   });
   me.peer.on('open',function(){
+    me.dmLogs=[]
     mainEvents.emit('renderer:setupComplete',{'username':username});
     var folderName = path.join('.', 'UserData');
     try {
@@ -1786,18 +2078,21 @@ function setupUser(username,settings){
     try {
       if (!fs.existsSync(folderName)) {
         fs.mkdirSync(folderName);
+        var jsonPath = path.join('.', 'UserData', username, 'config.json');
+        fs.writeFile(jsonPath, JSON.stringify(me.settings), err => {
+          if (err) {
+            console.error(err);
+          } else {
+            // file written successfully
+          }
+        });
+      }else{
+        loadSession(username)
       }
     } catch (err) {
       console.error(err);
     }
-    var jsonPath = path.join('.', 'UserData', username, 'config.json');
-    fs.writeFile(jsonPath, "content", err => {
-      if (err) {
-        console.error(err);
-      } else {
-        // file written successfully
-      }
-    });
+    
   });
 }
 //Step 2.A: Create a chat.
@@ -1818,6 +2113,7 @@ function createChat(chatName,chatPass){
     currentChat2=chatName;
     chats.set(chat.name,chat);
     mainEvents.emit('renderer:chatConnected',{'chat':chat.name});
+    
   },function(){
     mainEvents.emit('renderer:err',{'err':'Chat with name '+chatName+' could not be created.'});
     chat.close();
@@ -1843,6 +2139,7 @@ function joinChat(chatName,chatPass){
     currentChat2=chatName;
     chats.set(chat.name,chat);
     mainEvents.emit('renderer:chatConnected',{'chat':chat.name});
+    saveSession(me.username)
   },function(){
     mainEvents.emit('renderer:err',{'err':'Chat with name '+chatName+' could not be joined.'});
     chat.close();
@@ -1860,15 +2157,7 @@ mainEvents.on('main:sendMessage',( params) => {
 });
 function sendMessage(content){
   let chat=chats.get(currentChat2);
-  let data={
-        "from":chat.myName,
-        "command":"SNDMES",
-        "date":content.date,
-        "message":content.message
-  };
-  console.log('Sending message:', content.message);
-  chat.logs.push({'from':data.from,'date':data.date,'message':data.message});
-  chat.sendAll(data);
+  chat.sendMessage(content)
   console.log('Message sent:', content.message);
 }
 
@@ -1891,6 +2180,7 @@ mainEvents.on('main:chatClose',( params) => {
   }else{
     chat.close();
     chats.delete(params.chatName);
+    saveSession(me.username)
   }
   if(currentChat2===params.chatName){
     currentChat2=null;
@@ -1898,74 +2188,18 @@ mainEvents.on('main:chatClose',( params) => {
 });
 
 //DM stuff
-mainEvents.on('main:dm',( params) => {
-  sendDM(params.user,params.time,params.text);
-});
 
-function sendDM(user, time, text){
-  if (deepEqual(me,{})){
-    mainEvents.emit('renderer:err',{'message':'User not setup, please set username first.'});
-  }else{
-    let con =me.peer.connect(pre+user,{"serialization":"json"});
-    con.serialization='json';
-    con.on('error', function(err){
-      console.log(err);
-      mainEvents.emit('renderer:dmErr',{'err':"Error in connection to "+user+"."});
-      con.close();
-    });
-    con.on('close', function(){
-      console.log("con closed");
-    });
-    con.on('open',async function(){
-      con.send({"command":"DM",'user':me.username,'date':time,'message':text});
-      await sleep(100);
-      con.close();
-    });
-  }
-}
+
+
 
 //DM stuff
-mainEvents.on('main:invite',( params) => {
-  inviteToChat(params.user,params.time,params.chat);
-});
-function inviteToChat(user, time, chat){
-  if (deepEqual(me,{})){
-    mainEvents.emit('renderer:err',{'message':'User not setup, please set username first.'});
-    return;
-  }
-  console.log("Chat:"+chat)
-  var c =chats.get(chat);
-  if (!c){mainEvents.emit('renderer:dmErr',{'err':"User is not in this chat."}); return;}
-  if (c.canUser(c.myName,"invite")) {
-    let con =me.peer.connect(pre+user,{"serialization":"json"});
-    con.serialization='json';
-    con.on('error', function(err){
-      console.log(err);
-      mainEvents.emit('renderer:dmErr',{'err':"Error in connection to "+user+"."});
-      con.close();
-    });
-    con.on('close', function(){
-      console.log("con closed");
-    });
-    con.on('open',async function(){
-      con.send({"command":"INVCHT",'date':time,'chatId':c.name,"pass":c.pass});
-      //TO-DO: proof via private key encoding of date+invited username.
-      await sleep(100);
-      con.close();
-    });
-  }else mainEvents.emit('renderer:dmErr',{'err':"User doesn't have permissions to invite another user."});
-  
-}
+
+
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
-//TO-DO
-function generateKeyPair(){
-  let puKey = ' ';
-  let prKey = ' ';
-  return (puKey,prKey);
-}
+
 class Message{
   constructor(user,date,message){
     this.id=nextmessageID;
@@ -1977,7 +2211,76 @@ class Message{
   }
 }
 
+//Session:
+function loadSession(username){
+  console.log("loading")
+  let jsonPath = path.join('.', 'UserData', username, 'config.json');
+  let chatsPath = path.join('.', 'UserData', username, 'onlineChats.json');
+  let sessionDMsPath = path.join('.', 'UserData', username, 'DMs.json');
+  try{
+    me.config= JSON.parse(fs.readFileSync(jsonPath))
+  }catch(err){
+    console.log(err)
+  }
+  try{
+    let chatList = JSON.parse(fs.readFileSync(chatsPath))
+    chatList.forEach(t=>chats.set(t.name,createChat(t.name,t.pass)))
+  }catch(err){
+    console.log(err)
+  }
+  try{
+    me.dmLogs = JSON.parse(fs.readFileSync(sessionDMsPath))
+    me.dmLogs.forEach(dm=>{
+      if(dm.command==="/dm"){
+        displayDm(...dm.args)
+      }else if(dm.command==="/invite"){
+        displayInvite(...dm.args)
+      }
+    })
+  }catch(err){
+    console.log(err)
+  }
+  
+  
 
+
+}
+function saveSession(username){
+  console.log("Saving user data:")
+    let jsonPath = path.join('.', 'UserData', username, 'config.json');
+    //fs.writeFileSync(jsonPath, JSON.stringify(me.config))
+    /*, err => {
+      if (err) {
+        console.error(err);
+      } else {
+        // file written successfully
+      }
+    })*/
+    let chatsPath = path.join('.', 'UserData', username, 'onlineChats.json');
+    let chatList=[]
+    chats.forEach((chat,name)=>chatList.push({'name':name,'pass':chat.pass}))
+    fs.writeFileSync(chatsPath, JSON.stringify(chatList))
+    console.log(JSON.stringify(chatList))
+    /*, err => {
+      if (err) {
+        console.error(err);
+      } else {
+        // file written successfully
+      }
+    })*/
+    let sessionDMsPath = path.join('.', 'UserData', username, 'DMs.json');
+    fs.writeFileSync(sessionDMsPath, JSON.stringify(me.dmLogs))
+    console.log(JSON.stringify(me.dmLogs))
+    /*, err => {
+      if (err) {
+        console.error(err);
+      } else {
+        // file written successfully
+      }
+    })*/
+    chats.forEach(chat=>chat.save())
+
+}
 
 
 
@@ -1988,16 +2291,38 @@ function addElementToChat(e){
   document.getElementById("chatBox").appendChild(e);
 }
 function addToChat(message){
+    let chat= chats.get(currentChat)
     let li=document.createElement("li");
     li.setAttribute('id',message.id);
     let time = new Date(message.date);
     let messageDate = document.createTextNode(''+time.getHours()+':'+time.getMinutes()+' ');
     let name=document.createElement("b").appendChild(document.createTextNode(message.from));
-    let messageText = document.createTextNode(': ' + message.message);
-    
+    let messageText = document.createTextNode(': ');
+    let parsedMessage = ""+message.message;
+
     li.appendChild(messageDate);
     li.appendChild(name);
     li.appendChild(messageText);
+    let wasLastEmote = false;
+    parsedMessage.split(":").forEach((subR,i)=>{
+      if(i===0||i==parsedMessage.length-1){
+        li.appendChild(document.createTextNode(subR));
+        wasLastEmote=false;
+
+      }else
+      if(chat.emotes.has(subR)){
+        li.appendChild(chat.displayEmote(subR))
+        wasLastEmote=true;
+      }else{
+        if(!wasLastEmote){
+          li.appendChild(document.createTextNode(":"+subR));
+        }else{
+          li.appendChild(document.createTextNode(subR));
+        }
+        
+        wasLastEmote=false;
+      }
+    })
     //messages.push(mParsed);
     document.getElementById("chatBox").appendChild(li);
 
@@ -2018,6 +2343,7 @@ function addEventToChat(date,message){
 //Creates User
 function userCreate(){
   var username = document.getElementById("createUserName").value;
+  console.log(username)
   //var password = document.getElementById("createUserPass").value;
   var settings = {"peerJsOptions":PEERJS_OPTIONS};
   myID=username;
@@ -2115,61 +2441,119 @@ function chatSendMessage(){
 
 //Treats dm messages and sends them
 function dm(){
+  let time = Date.now()
   let message = document.getElementById("dmMessageInput").value;
-  //  /dm [username], [message]<br />
+
   let command = message.split(' ')[0];
+  let to = message.split(' ')[1].split(',')[0].trim();
+  let text = message.split(',')[1].trim();
+  if(!command ||!text || !to){
+    return;
+  }
   if(command==="/dm"){
-    
-    //let user = message.split(':')[0].split(' ')[1];
-    let user = message.split(' ')[1].split(',')[0].trim();
-    let text = message.split(',')[1].trim();
-    if(!text || !user){
+    let sender = me.username;
+    displayDm(sender,to,text,time)
+    me.dmLogs.push({command,args:[sender,to,text,time]})
+    sendDM(to, time, text)
+  }else if (command==="/invite"){
+    let pass=inviteToChat(to, time, text)
+    if (pass||pass===""){
+      me.dmLogs.push({command,args:[to,time,text,pass,true]})
+      displayInvite(to,time,text,pass,true);
+    }
+  }
+  document.querySelector("#dmMessageInput").value="";
+  
+  saveSession(me.username)
 
-    }else{
-
-
-    let time = new Date();
-    mainEvents.emit('main:dm', {
-      user,time,text
-    });
-   
-
+}
+function displayDm(sender,to,message,date){
+    if(typeof date === "number"||typeof date ==="string")
+      date = new Date(date)
     let li=document.createElement("li");
-    let messageDate = document.createTextNode(''+time.getHours()+':'+time.getMinutes()+' ');
-    let name=document.createElement("b").appendChild(document.createTextNode(myID+'=>'+user));
-    let messageText = document.createTextNode(': ' + text);
+    let text = document.createTextNode(''+date.getHours()+':'+date.getMinutes()+' '+sender+'=>'+to+': ' + message);
+    li.appendChild(text);
+    document.getElementById("dms").appendChild(li);
+}
+function displayInvite(friend,date,chat,pass,isSender=true){
+  if(typeof date === "number"||typeof date ==="string")
+  date = new Date(date)
+  if(isSender){
+    let li=document.createElement("li");
+    let messageDate = document.createTextNode(''+date.getHours()+':'+date.getMinutes()+' ');
+    let name=document.createElement("b").appendChild(document.createTextNode('You have invited '+friend+' to chat '+chat+'.'));
     li.appendChild(messageDate);
     li.appendChild(name);
-    li.appendChild(messageText);
     document.getElementById("dms").appendChild(li);
-    document.querySelector("#dmMessageInput").value="";
-        }
+  }else{
+    let li=document.createElement("li");
+    let text = document.createTextNode(''+friend+' has invited you to join the chat named"' + chat+'".');
+    var button = document.createElement("button");
+    button.innerHTML = "Join";
+    li.appendChild(text);
+    li.appendChild(button);
+    document.getElementById("dms").appendChild(li);
+    button.addEventListener ("click", function() {
+      //button.disabled = true;
+      button.innerHTML = "Joined"
+      createChat(chat,pass);
+    });
   }
-  if(command ==="/invite"){
-    let user = message.split(' ')[1].split(',')[0].trim();
-    let chat = message.split(',')[1].trim();
-    console.log("Inviting user:"+user+" to chat:"+chat+".")
-    if(!user || !chat){
-
-    }else{
-      let time = new Date();
-      mainEvents.emit('main:invite', {
-        user,time,chat
-      });
-      let li=document.createElement("li");
-      let messageDate = document.createTextNode(''+time.getHours()+':'+time.getMinutes()+' ');
-      let name=document.createElement("b").appendChild(document.createTextNode(myID+' invited '+user+' to chat '+chat+'.'));
-      li.appendChild(messageDate);
-      li.appendChild(name);
-      document.getElementById("dms").appendChild(li);
-      document.querySelector("#dmMessageInput").value="";
-    }
+}
+function sendDM(user, time, text){
+  if (deepEqual(me,{})){
+    mainEvents.emit('renderer:err',{'message':'User not setup, please set username first.'});
+  }else{
+    let con =me.peer.connect(pre+user,{"serialization":"json"});
+    con.serialization='json';
+    con.on('error', function(err){
+      console.log(err);
+      mainEvents.emit('renderer:dmErr',{'err':"Error in connection to "+user+"."});
+      con.close();
+    });
+    con.on('close', function(){
+      console.log("con closed");
+    });
+    con.on('open',async function(){
+      con.send({"command":"DM",'user':me.username,'date':time,'message':text});
+      await sleep(100);
+      con.close();
+    });
   }
 }
 
+function inviteToChat(user, time, chat){
+  if (deepEqual(me,{})){
+    mainEvents.emit('renderer:err',{'message':'User not setup, please set username first.'});
+    return;
+  }
+  console.log("Chat:"+chat)
+  var c =chats.get(chat);
+  if (!c){mainEvents.emit('renderer:dmErr',{'err':"User is not in this chat."}); return;}
+  if (c.canUser(c.myName,"invite")) {
+    let con =me.peer.connect(pre+user,{"serialization":"json"});
+    con.on('error', function(err){
+      console.log(err);
+      mainEvents.emit('renderer:dmErr',{'err':"Error in connection to "+user+"."});
+      con.close();
+    });
+    con.on('close', function(){
+      console.log("con closed");
+    });
+    con.on('open',async function(){
+      con.send({"command":"INVCHT",'date':time,'chatId':c.name,"pass":c.pass});
+      //TO-DO: proof via private key encoding of date+invited username.
+      await sleep(100);
+      con.close();
+    });
+    return c.pass;
+  }else mainEvents.emit('renderer:dmErr',{'err':"User doesn't have permissions to invite another user."});
+  
+}
 mainEvents.on('renderer:err', function (data)  {displayGeneralError(data);});
 mainEvents.on('renderer:chatConnected', function (data)  {
   //Chat setup complete; switch to chat.
+  saveSession(me.username)
   chatPrepareTab(data.chat);
 });
 mainEvents.on('renderer:chatEvent', function (data)  {addEventToChat(data.date,data.message)});
@@ -2178,6 +2562,7 @@ mainEvents.on('renderer:messageRcv', function (data)  {
   addToChat(m);
 });
 function resetChat(logs){
+  console.log(logs)
   let i=0;
   document.getElementById("chatBox").textContent='';
   logs.forEach(function(item){
@@ -2187,12 +2572,13 @@ function resetChat(logs){
         console.log("ITS A FILE")
         chats.get(currentChat).displayShareLink(item.from,item.file,item.size)
       }else{
-        console.log(item);
+        console.log("ITS A MESSAGE")
         let m= new Message(item.from,item.date,item.message)
         addToChat(m);
       }
 
     }else{
+      console.log("ITS A EVENT")
       addEventToChat(item.date,item.message);
       i=i+1;
     }
@@ -2204,33 +2590,10 @@ mainEvents.on('renderer:switched', function (data)  {
   console.log(data.logs);
   //myID=0;
   resetChat(data.logs)
+  chats.get(currentChat).loadEmoteList()
 });
 //mainEvents.on('renderer:anonCon', function (data)  {});  //TO-DO
-mainEvents.on('renderer:chatInvite', function (data)  {
-  let li=document.createElement("li");
-  let text = document.createTextNode(''+data.user+' has invited you to join the chat named"' + data.to+'".');
-  var button = document.createElement("button");
-  button.innerHTML = "Join";
-  li.appendChild(text);
-  li.appendChild(button);
-  let name =data.to;
-  let pass = data.pass;
-  document.getElementById("dms").appendChild(li);
-  button.addEventListener ("click", function() {
-    button.disabled = true;
-    button.innerHTML = "Joined"
-    mainEvents.emit('main:chatJoin', {
-      name, pass
-    });
-  });
-});
-mainEvents.on('renderer:dm', function (data)  {
-  let li=document.createElement("li");
-  let time = new Date();
-  let text = document.createTextNode(''+time.getHours()+':'+time.getMinutes()+' '+data.user+'=>'+myID+': ' + data.message);
-  li.appendChild(text);
-  document.getElementById("dms").appendChild(li);
-});
+
 
 mainEvents.on('renderer:userCreateErr', function (data)  {
   displayGeneralError(data);
@@ -2357,10 +2720,37 @@ function chatShareFile(){
   let chat = chats.get(currentChat);
   chat.shareFiles(document.getElementById("fileToShare").files);
 }
+function chatShareEmote(){
+  let chat = chats.get(currentChat);
+  let selectedFile = document.getElementById("emoteUpload").files[0];
+   selectedFile = {
+    name:selectedFile.name,
+    path:selectedFile.path,
+    lastModified:selectedFile.lastModified,
+    size:selectedFile.size,
+    type:"emote"
+
+  }
+  console.log( document.getElementById("emoteUpload").files[0])
+  let name = document.getElementById("emoteName").value;
+  chat.shareEmote(name,selectedFile);
+}
 function displayFileSize(byteCount){
   let fileSize = byteCount.toString();
 
   if(fileSize.length < 7) return `${Math.round(+fileSize/1024).toFixed(2)}kb`
       return `${(Math.round(+fileSize/1024)/1000).toFixed(2)}MB`
 
+}
+function addEmoteToEmoteMenu(name,htmlElement){
+  console.log("Adding emote to menu: "+ name)
+  console.log(htmlElement)
+  let eList = document.getElementById("emoteList")
+  let emotes = eList.getElementsByClassName("emote_"+name)
+  console.log(emotes)
+  if(emotes.length!==0){
+    emotes[0].parentNode.replaceChild(htmlElement,emotes[0])
+    //eList.removeChild(emotes[0])
+  }else
+  eList.appendChild(htmlElement)
 }

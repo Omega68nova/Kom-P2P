@@ -18,6 +18,7 @@
  width:90px; 
  float:left;
 }
+
 #right{
     display:none;
     position: fixed;
@@ -42,8 +43,8 @@ button{
     border: none;
     cursor: pointer;
 }
-image, video, audio{
-  width:100%
+image,img, video, audio{
+  max-width: 300px;
 }
 
 .open-button {
