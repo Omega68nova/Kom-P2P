@@ -35,8 +35,10 @@ class Queue {
     return this.length === 0;
   }
 }
-
-const PEERJS_OPTIONS = {    
+function setPeerJsOptions(options){
+  PEERJS_OPTIONS = options
+}
+var PEERJS_OPTIONS = {    
   
   		'host': "127.0.0.1",
 		'port': 9005,
@@ -801,4 +803,4 @@ class ConHandler{
       }
 }
 //module.exports = {ConHandler, ConData,PEERJS_OPTIONS, CON_OPTIONS}
-export{ConHandler, ConData,PEERJS_OPTIONS, CON_OPTIONS}
+export{ConHandler, ConData,PEERJS_OPTIONS, CON_OPTIONS,setPeerJsOptions}

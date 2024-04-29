@@ -27,13 +27,13 @@
       This server is used to find other people and stablish connections, all the server can see are connections and disconnections, the data sent between users is all private.
       This part is optional and can be skipped, but note that the default peerServer is known for having problems when clossing connections.
       <form id="createServerForm">
-        Server:<br /><input id="createServerName" placeholder="Server1"></input><br />
-        IP (only if joining another):<br /><input id="createServerIP" placeholder="Server1"></input><br />
-        Port:<br /><input id="createServerport" placeholder="Server1"></input><br />
+        Server:<br /><input id="createServerName" value="/myApp"></input><br />
+        IP (only if joining another):<br /><input id="createServerIP" value="127.0.0.1"></input><br />
+        Port:<br /><input id="createServerport" value="9005"></input><br />
         <br />
-        <button type="submit" id="defaultPeerServerButton">Skip</button>
-        <button type="submit" id="createPeerServerButton">Create</button>
-        <button type="submit" id="joinPeerServerButton">Join</button>
+        <button type="button" id="defaultPeerServerButton">Skip</button>
+        <button type="button" id="createPeerServerButton">Create</button>
+        <button type="button" id="joinPeerServerButton">Join</button>
       </form>
 
     </div>

@@ -6,8 +6,10 @@
  * to expose Node.js functionality from the main process.
  */
 const chatMenu = document.getElementById("chats");
+const { ipcRenderer } = require('electron');
+const PeerServer = require('peer').PeerServer;
 const EventEmitter = require('events');
-const mainEvents = new EventEmitter();
+//const mainEvents = new EventEmitter();
 const path = require('path');
 //import { DataConnection, ConnectionEventType, BaseConnection } from './peerjs.min.js'
 const { emitKeypressEvents } = require('readline');
@@ -18,7 +20,9 @@ const open = require('sqlite').open
 import {Peer} from "https://esm.sh/peerjs@1.5.2?bundle-deps"
 //const Peer = require('peerjs').Peer;
 import {P2PTreeNode,P2PTreeNodeTree, P2PMeshNode, P2PFullConnectedTopo} from "./topology.js"
-import {ConHandler, ConData,PEERJS_OPTIONS, CON_OPTIONS} from "./conHandler.js"
+import {ConHandler, ConData, PEERJS_OPTIONS,CON_OPTIONS,setPeerJsOptions} from "./conHandler.js"
+//var  = require("./conHandler.js").PEERJS_OPTIONS
+
 import {encryptWithPublicKey,decryptWithPrivateKey,sign,verify,generateKeys,importKey,exportKey} from "./crypto.js"
 const pre = "omega68ChatApp-user-";
 const preChat = "omega68ChatApp-chat-";
@@ -88,13 +92,117 @@ window.onload = function () {
     e.preventDefault();
     chatShareEmote();
   });
-  show('start');
+  document.querySelector("#defaultPeerServerButton").addEventListener('click', e => {
+    e.preventDefault();
+    setPeerServerToDefault();
+  });
+  document.querySelector("#createPeerServerButton").addEventListener('click', e => {
+    e.preventDefault();
+    createPeerServer()
+  });
+  document.querySelector("#joinPeerServerButton").addEventListener('click', e => {
+    e.preventDefault();
+    joinPeerServer();
+  });
+
+  show('peerServer')
+  hide('start');
   hide('chat');
   hide('DMs');
   hide('chatCreation');
-  hide('peerServer');
+  //hide('peerServer');
   hide('emoteMenu');
 };
+function setPeerServerToDefault(){
+  hide('peerServer')
+  show('start');
+}
+function joinPeerServer(){
+  let dir = document.getElementById("createServerName").value;
+  let IP = document.getElementById("createServerIP").value;
+  let port =document.getElementById("createServerport").value;
+  setPeerJsOptions({
+    'host': IP,
+		'port': port,
+		'path': dir,
+    'iceServers': [
+{ 'urls': 'stun:stun.l.google.com:19302' },
+{
+  'urls': "turn:omegachatapp.metered.live:80",
+  'username': "371bec6b38c070c460b0046f",
+  'credential': "0WiOAZKfxs9jqcLT",
+},
+{
+  'urls': "turn:omegachatapp.metered.live:80?transport=tcp",
+  'username': "371bec6b38c070c460b0046f",
+  'credential': "0WiOAZKfxs9jqcLT",
+},
+{
+  'urls': "turn:omegachatapp.metered.live:443",
+  'username': "371bec6b38c070c460b0046f",
+  'credential': "0WiOAZKfxs9jqcLT",
+},
+{
+  'urls': "turn:omegachatapp.metered.live:443?transport=tcp",
+  'username': "371bec6b38c070c460b0046f",
+  'credential': "0WiOAZKfxs9jqcLT",
+}
+], 
+'sdpSemantics': 'unified-plan' 
+  })
+  hide('peerServer')
+  show('start');
+
+}
+function createPeerServer(){
+  let dir = document.getElementById("createServerName").value;
+  let IP = document.getElementById("createServerIP").value;
+  let port =document.getElementById("createServerport").value;
+
+    console.log([dir,IP,port])
+  try{
+    var server = PeerServer({port: port, path: dir}); 
+    setPeerJsOptions({
+      'host': "127.0.0.1",
+      'port': port,
+      'path': dir,
+      'iceServers': [
+      { 'urls': 'stun:stun.l.google.com:19302' },
+      {
+        'urls': "turn:omegachatapp.metered.live:80",
+        'username': "371bec6b38c070c460b0046f",
+        'credential': "0WiOAZKfxs9jqcLT",
+      },
+      {
+        'urls': "turn:omegachatapp.metered.live:80?transport=tcp",
+        'username': "371bec6b38c070c460b0046f",
+        'credential': "0WiOAZKfxs9jqcLT",
+      },
+      {
+        'urls': "turn:omegachatapp.metered.live:443",
+        'username': "371bec6b38c070c460b0046f",
+        'credential': "0WiOAZKfxs9jqcLT",
+      },
+      {
+        'urls': "turn:omegachatapp.metered.live:443?transport=tcp",
+        'username': "371bec6b38c070c460b0046f",
+        'credential': "0WiOAZKfxs9jqcLT",
+      }
+      ], 
+      'sdpSemantics': 'unified-plan' 
+    })
+    console.log(server)
+    server.on('connection', (client) => { console.log("Connected: "+client) });
+    server.on('disconnect', (client) => { console.log("Disconnected: "+client) });
+  
+    hide('peerServer')
+    show('start');
+  
+  }catch(err){
+    displayGeneralError(err)
+  }
+}
+
 window.onbeforeunload = (e) => {
   if(me.username)
     saveSession(me.username)
@@ -367,7 +475,7 @@ class chatData{
     if(u){
       if(!u.online){
         let event = {'date': new Date().getTime(),'message':'User '+name+' rejoined the chat.','chat':this.name}
-        mainEvents.emit('renderer:chatEvent',event);
+        addEventToChat(event.date,event.message,this.name);
         this.logs.push(event);
         u.online=true;
         if(!this.conTree.find(u.name)){
@@ -397,7 +505,7 @@ class chatData{
       if(u.online===true){
         
         let event = {'date': new Date().getTime(),'message':'User '+name+' left the chat.','chat':this.name}
-        mainEvents.emit('renderer:chatEvent',event);
+        addEventToChat(event.date,event.message,this.name);
         this.logs.push(event);
         u.online=false;
         this.conTree.remove(name);
@@ -414,7 +522,7 @@ class chatData{
   addUser(u){
     if(!this.findUser(u.name)){
       let event = {'date': new Date().getTime(),'message':'User '+u.name+' joined the chat.','chat':this.name}
-      mainEvents.emit('renderer:chatEvent',event);
+      addEventToChat(event.date,event.message,this.name);
       this.logs.push(event);
       this.users.push(u);
       if(u.online && this.conTree&&!this.conTree.find(u.name)){
@@ -438,7 +546,7 @@ class chatData{
   }
   deleteUser(name){
     let event = {'date': new Date().getTime(),'message':'User '+name+' was kicked from the chat.','chat':this.name}
-    mainEvents.emit('renderer:chatEvent',event);
+    addEventToChat(event.date,event.message,this.name);
     this.logs.push(event);
     u=this.findUser(name);
     if(u){
@@ -564,7 +672,7 @@ class chatData{
             return;
           }
           chat.login(data.name);
-          mainEvents.emit('renderer:chatEvent',{'date':data.date,'message':data.name+' logged back in.'});
+          addEventToChat(data.date,data.name+' logged back in.',chat.name);
           chat.logs.push({'date':data.date,'message':data.name+' logged back in.'});
           chat.reSend(dataOld,from);
           break;
@@ -575,7 +683,7 @@ class chatData{
           }
           let u = new user(1,data.name,data.puKey,true);
           chat.addUser(u);
-          mainEvents.emit('renderer:chatEvent',{'date':data.date,'message':data.name+' joined the chat.','chat':chat.name});
+          addEventToChat(data.date,data.name+' joined the chat.',chat.name);
           chat.logs.push({'date':data.date,'message':data.name+' joined the chat.'});
           chat.reSend(dataOld,from);
           break;
@@ -585,14 +693,14 @@ class chatData{
             return;
           }
           chat.logout(data.name);
-          mainEvents.emit('renderer:chatEvent',{'date':data.date,'message':data.name+' logged out.'});
+          addEventToChat(data.date,data.name+' logged out.',chat.name);
           chat.logs.push({'date':data.date,'message':data.name+' logged out.'});
           chat.reSend(dataOld,from);
           break;
       case 'USRLOS':
           if(chat.amRoot){
               chat.logout(data.name);
-              mainEvents.emit('renderer:chatEvent',{'date':data.date,'message':data.name+' logged out.'});
+              addEventToChat(data.date,data.name+' logged out.',chat.name)
               chat.logs.push({'date':data.date,'message':data.name+' logged out.'});
               chat.sendAll({"command":'LOGOUT',"name":data.name});
           }else{
@@ -602,7 +710,8 @@ class chatData{
       
       case 'SNDMES':
           chat.logs.push({'from':data.from,'date':data.date,'message':data.message});
-          mainEvents.emit('renderer:messageRcv',{'user':data.from, 'date':data.date, 'message':data.message});
+          let m = new Message(data.from,data.date,data.message);   
+          addToChat(m);
           chat.reSend(dataOld,from);
           break;
       case 'GIVDAT':
@@ -972,15 +1081,15 @@ class chatData{
       //}          
     }
   }
-  sendMessage(content){
+  sendMessage(date,message){
     let data={
           "from":this.myName,
           "command":"SNDMES",
-          "date":content.date,
-          "message":content.message
+          "date":date,
+          "message":message
     };
-    console.log('Sending message:', content.message);
-    this.logs.push({'from':data.from,'date':data.date,'message':data.message});
+    console.log('Sending message:', message);
+    this.logs.push({'from':data.from,'date':date,'message':message});
     this.sendAll(data);
   }
 
@@ -1097,7 +1206,6 @@ class chatData{
                   chat.sendAsRoot(chatData,from)
                 }else{
                   //let message ={'date':new Date().getTime(),'message':data.name+' logged out.'};
-                  //mainEvents.emit('renderer:chatEvent',message);
                   //chat.logs.push(message);
   
                   chat.sendAllRoot({"command":'LOGOUT',"name":data.name});
@@ -1732,38 +1840,43 @@ class chatData{
       let finalLog = []
       let i = 0;
       let j = 0;
-      console.log(this.logs.length)
-      console.log(logs.length)
+
       while(i<this.logs.length&&j<logs.length){
-        console.log(i)
-        console.log(this.logs[i])
-        console.log(j)
-        console.log(logs[j])
+        //console.log("this:"+(i+1)+"/"+this.logs.length)
+        //console.log(this.logs[i])
+        //console.log("import:"+(j+1)+"/"+logs.length)
+        //console.log(logs[j])
         if(deepEqual(this.logs[i],logs[j])){
+          //console.log("Same message.")
           finalLog.push(this.logs[i])
           i++
           j++
-        }else 
-          if(this.logs[i].date<logs[j].date){
+        }else if(this.logs[i].date<logs[j].date){
+          //console.log("From this first.")
             finalLog.push(this.logs[i])
             i++
-          }else
-          if(this.logs[i].date>logs[j].date){
+        }else if(this.logs[i].date>logs[j].date){
+          //console.log("From import first.")
             finalLog.push(logs[j])
             j++
             addedSomething=true;
         }else{
+          //console.log("Both at the same time.")
           finalLog.push(this.logs[i])
           finalLog.push(logs[j])
           i++
           j++
+          addedSomething=true;
         }
       }
       if(i === this.logs.length){
-        finalLog.concat(logs.slice(j))
+        //console.log("Adding rest from import.")
+        finalLog=finalLog.concat(logs.slice(j))
         addedSomething=true;
-      }else{
-        finalLog.concat(this.logs.slice(i))
+      }
+      if(j === logs.length){
+        //console.log("Adding rest from logs.")
+        finalLog=finalLog.concat(this.logs.slice(i))
       }
       this.logs=finalLog
     }
@@ -2032,20 +2145,19 @@ function setupUser(username,settings){
   me.peer.on('error',function(err){
     console.log(err);
     if(err.type==='unavailable-id'||err.type==='invalid-id'){
-      mainEvents.emit('renderer:err',{'err':"Username invalid or already taken, please try another one."});
+      displayGeneralError("Username invalid or already taken, please try another one.")
       me.username=null;
       me.peer.destroy();
     }else if (err.type==='peer-unavailable'){
-      mainEvents.emit('renderer:dmErr',{'err':"User not found online, message will not reach them."});
+      displayDmErr("User not found online, message will not reach them.");
     }else{
-      mainEvents.emit('renderer:err',{'err':"Error with user peer detected. This might be nothing, or it might be fatal to the ability to connect to other users. If so, please notify the app developer."});
+      displayGeneralError("Error with user peer detected. This might be nothing, or it might be fatal to the ability to connect to other users. If so, please notify the app developer.")
     }
   });
   me.peer.on('connection', function(con) {
     con.serialization='json';
     console.log("Connected to user "+(''+con.peer).replace(pre,''));
     var sender=(''+con.peer).replace(pre,'');
-    mainEvents.emit('renderer:anonCon',{'username':sender});
     con.on('data', function(data) {
       console.log("Data received at user con: "+data.command);
       if(data.command==="INVCHT"){
@@ -2055,7 +2167,6 @@ function setupUser(username,settings){
       // TO-DO: cyphering of DMs
       if(data.command==="DM"){
         
-        //mainEvents.emit('renderer:dm',{'user':sender,'date':data.date,'message':data.message});
         me.dmLogs.push({command:"/dm",args:[sender,me.username,data.message,data.date]})
         displayDm(sender,me.username,data.message,data.date)
         
@@ -2065,7 +2176,10 @@ function setupUser(username,settings){
   });
   me.peer.on('open',function(){
     me.dmLogs=[]
-    mainEvents.emit('renderer:setupComplete',{'username':username});
+    document.getElementById("username").appendChild(document.createTextNode("Welcome, "+username));
+    document.getElementById('DMsButton').disabled = false;
+    document.getElementById('plus').disabled = false;
+    changeMode('chatCreation');
     var folderName = path.join('.', 'UserData');
     try {
       if (!fs.existsSync(folderName)) {
@@ -2100,22 +2214,17 @@ function setupUser(username,settings){
 // -Setup PEERJS_OPTIONS.
 // -Add cyphering.
 // -Add admin acceptance of users.
-mainEvents.on('main:chatCreate',( params) => {
-  if (deepEqual(me,{})){
-    mainEvents.emit('renderer:err',{'err':'User not setup, please set username first.'});
-  }else{
-    createChat(params.name,params.pass);
-  }
-});
+
 function createChat(chatName,chatPass){
   //Star chat Peer
   let chat  = new chatData(chatName,chatPass,me.username,me.puKey,me.prKey,true,function(){
     currentChat2=chatName;
     chats.set(chat.name,chat);
-    mainEvents.emit('renderer:chatConnected',{'chat':chat.name});
+    saveSession(me.username)
+    chatPrepareTab(chat.name);
     
   },function(){
-    mainEvents.emit('renderer:err',{'err':'Chat with name '+chatName+' could not be created.'});
+    displayGeneralError('Chat with name '+chatName+' could not be created.')
     chat.close();
     chatClose(chatName);
   });
@@ -2123,13 +2232,7 @@ function createChat(chatName,chatPass){
 }
 
 //Step 2.B: Join a chat.
-mainEvents.on('main:chatJoin',( params) => {
-  if(deepEqual(me,{})){
-    mainEvents.emit('renderer:err',{'err':'User not setup, please set username first.'});
-  }else{
-  joinChat(params.name,params.pass);
-  }
-});
+
 
 function joinChat(chatName,chatPass){
   var chatName;
@@ -2138,10 +2241,10 @@ function joinChat(chatName,chatPass){
   let chat  = new chatData(chatName,chatPass,me.username,me.puKey,me.prKey,false,function(){
     currentChat2=chatName;
     chats.set(chat.name,chat);
-    mainEvents.emit('renderer:chatConnected',{'chat':chat.name});
     saveSession(me.username)
+    chatPrepareTab(chat.name);
   },function(){
-    mainEvents.emit('renderer:err',{'err':'Chat with name '+chatName+' could not be joined.'});
+    displayGeneralError('Chat with name '+chatName+' could not be joined.');
     chat.close();
     chatClose(chatName);
   });
@@ -2152,40 +2255,15 @@ function joinChat(chatName,chatPass){
 
 //Step 3: Send Message.
 
-mainEvents.on('main:sendMessage',( params) => {
-  sendMessage(params);
-});
-function sendMessage(content){
-  let chat=chats.get(currentChat2);
-  chat.sendMessage(content)
-  console.log('Message sent:', content.message);
-}
+
 
 //Step 4: Switch chats.
-mainEvents.on('main:chatSwitch',( params) => {
-  if (!chats.get(params.chatName)){
-    mainEvents.emit('renderer:err',{'err':'Chat with name '+params.chatName+' does not exist.'});
-  }else{
-    currentChat2=params.chatName;
-    mainEvents.emit('renderer:switched',{'chat':currentChat2,'logs':chats.get(currentChat2).logs});
-  }
-});
+
 
 //Step 5: Close chat.
-mainEvents.on('main:chatClose',( params) => {
+
   //console.log("Closing chat: ["+ params+"]")
-  let chat=chats.get(params.chatName);
-  if (!chat){
-    mainEvents.emit('renderer:err',{'err':'Chat with name '+params.chatName+' does not exist.'});
-  }else{
-    chat.close();
-    chats.delete(params.chatName);
-    saveSession(me.username)
-  }
-  if(currentChat2===params.chatName){
-    currentChat2=null;
-  }
-});
+
 
 //DM stuff
 
@@ -2327,7 +2405,8 @@ function addToChat(message){
     document.getElementById("chatBox").appendChild(li);
 
 }
-function addEventToChat(date,message){
+function addEventToChat(date,message,chat=undefined){
+  if(chat&&chat!==currentChat) return
   let li=document.createElement("li");
   //li.setAttribute('id',mParsed.id); no need for a ID
   let time = new Date(date);
@@ -2354,16 +2433,20 @@ function userCreate(){
 function chatJoin(){
   var name =document.getElementById("joinChatName").value;
   var pass =document.getElementById("joinChatPass").value;
-  mainEvents.emit('main:chatJoin', {
-    name, pass
-  });
+  if(deepEqual(me,{})){
+    displayGeneralError('User not setup, please set username first.')
+  }else{
+  joinChat(name,pass);
+  }
 }
 function chatCreate(){
   var name =document.getElementById("createChatName").value;
   var pass =document.getElementById("createChatPass").value;
-  mainEvents.emit('main:chatCreate', {
-    name, pass
-  });
+  if (deepEqual(me,{})){
+    displayGeneralError('User not setup, please set username first.')
+  }else{
+    createChat(name,pass);
+  }
 }
 function chatPrepareTab(id){
   var button = document.createElement("button");
@@ -2393,16 +2476,31 @@ function chatClose(chatName){
     button.remove();
   if (button2)
     button2.remove();
-  mainEvents.emit('main:chatClose', {
-    chatName
-  });
+    let chat=chats.get(chatName);
+    if (!chat){
+      displayGeneralError('Chat with name '+chatName+' does not exist.');
+    }else{
+      chat.close();
+      chats.delete(chatName);
+      saveSession(me.username)
+    }
+    if(currentChat2===chatName){
+      currentChat2=null;
+    }
 }
 
 //Switches chat
 function chatSwitchStart(chatName){
-  mainEvents.emit('main:chatSwitch', {
-    chatName
-  });
+  if (!chats.get(chatName)){
+    displayGeneralError('Chat with name '+chatName+' does not exist.')
+  }else{
+    currentChat2=chatName;
+    document.getElementById("chatName").textContent=currentChat2;
+    console.log(chats.get(currentChat2).logs);
+    //myID=0;
+    resetChat(chats.get(currentChat2).logs)
+    chats.get(currentChat).loadEmoteList()
+  }
 }
 
 //Changes between chat, dm, and new chat menus.
@@ -2432,9 +2530,9 @@ function show(id){
 function chatSendMessage(){
   let date= new Date().getTime();
   let message = document.getElementById("chatMessageInput").value;
-  mainEvents.emit('main:sendMessage', {
-    date, message
-  });
+  let chat=chats.get(currentChat);
+  chat.sendMessage(date,message)
+  console.log('Message sent:', message);
   addToChat(new Message(myID,date,message));
   document.querySelector("#chatMessageInput").value="";
 }
@@ -2502,13 +2600,13 @@ function displayInvite(friend,date,chat,pass,isSender=true){
 }
 function sendDM(user, time, text){
   if (deepEqual(me,{})){
-    mainEvents.emit('renderer:err',{'message':'User not setup, please set username first.'});
+    displayGeneralError("User not setup, please set username first");
   }else{
     let con =me.peer.connect(pre+user,{"serialization":"json"});
     con.serialization='json';
     con.on('error', function(err){
       console.log(err);
-      mainEvents.emit('renderer:dmErr',{'err':"Error in connection to "+user+"."});
+      displayDmErr("Error in connection to "+user+".");
       con.close();
     });
     con.on('close', function(){
@@ -2524,17 +2622,17 @@ function sendDM(user, time, text){
 
 function inviteToChat(user, time, chat){
   if (deepEqual(me,{})){
-    mainEvents.emit('renderer:err',{'message':'User not setup, please set username first.'});
+    displayGeneralError("User not setup, please set username first");
     return;
   }
   console.log("Chat:"+chat)
   var c =chats.get(chat);
-  if (!c){mainEvents.emit('renderer:dmErr',{'err':"User is not in this chat."}); return;}
+  if (!c){displayDmErr("User is not in this chat."); return;}
   if (c.canUser(c.myName,"invite")) {
     let con =me.peer.connect(pre+user,{"serialization":"json"});
     con.on('error', function(err){
       console.log(err);
-      mainEvents.emit('renderer:dmErr',{'err':"Error in connection to "+user+"."});
+      displayDmErr("Error in connection to "+user+".");
       con.close();
     });
     con.on('close', function(){
@@ -2547,20 +2645,11 @@ function inviteToChat(user, time, chat){
       con.close();
     });
     return c.pass;
-  }else mainEvents.emit('renderer:dmErr',{'err':"User doesn't have permissions to invite another user."});
+  }else displayDmErr("User doesn't have permissions to invite another user.");
   
 }
-mainEvents.on('renderer:err', function (data)  {displayGeneralError(data);});
-mainEvents.on('renderer:chatConnected', function (data)  {
-  //Chat setup complete; switch to chat.
-  saveSession(me.username)
-  chatPrepareTab(data.chat);
-});
-mainEvents.on('renderer:chatEvent', function (data)  {addEventToChat(data.date,data.message)});
-mainEvents.on('renderer:messageRcv', function (data)  {   
-  let m = new Message(data.user,data.date,data.message);   
-  addToChat(m);
-});
+
+
 function resetChat(logs){
   console.log(logs)
   let i=0;
@@ -2584,34 +2673,23 @@ function resetChat(logs){
     }
   });
 }
-mainEvents.on('renderer:switched', function (data)  {
-
-  document.getElementById("chatName").textContent=data.chat;
-  console.log(data.logs);
-  //myID=0;
-  resetChat(data.logs)
-  chats.get(currentChat).loadEmoteList()
-});
-//mainEvents.on('renderer:anonCon', function (data)  {});  //TO-DO
 
 
-mainEvents.on('renderer:userCreateErr', function (data)  {
-  displayGeneralError(data);
-});
 //Error popup.
-var stayAmmount = 0;
+//var stayAmmount = 0;
 
 
 async function displayGeneralError(data){
-  document.getElementById("ErrorText").innerHTML=data.err;
-  if(stayAmmount>0){
-    stayAmmount= 5000;
-  }else{
+  document.getElementById("ErrorText").innerHTML=data;
+
+  let stayAmmount= 5000;
+
     fadeInEffect("ErrorText");
-    await sleep(stayAmmount);
-    fadeOutEffect("ErrorText");
-    document.getElementById("ErrorText").innerHTML="";
-  }
+    window.setTimeout(function(){
+      fadeOutEffect("ErrorText");
+      document.getElementById("ErrorText").innerHTML="";
+    },stayAmmount)
+  
 }
 document.getElementById("ErrorText").addEventListener('click', fadeOutEffect);
 function fadeOutEffect(name) {
@@ -2681,19 +2759,15 @@ function fadeInEffect(name) {
 
 
 
-mainEvents.on('renderer:dmErr', function (data)  {
+
+function displayDmErr(err){
   let li=document.createElement("li");
-  let text = document.createTextNode(data.err);
+  let text = document.createTextNode(err);
   li.appendChild(text);
   document.getElementById("dms").appendChild(li);
-});    
-mainEvents.on('renderer:setupComplete', function (data)  {
-  //User setup complete; enable chat creation, dms buttons, switch to creation menu.
-  document.getElementById("username").appendChild(document.createTextNode("Welcome, "+data.username));
-  document.getElementById('DMsButton').disabled = false;
-  document.getElementById('plus').disabled = false;
-  changeMode('chatCreation');
-}); 
+}
+
+
 
 function chatShowTree(){
   document.getElementById("dataDisplayArea").innerHTML=chats.get(currentChat).conTree.display();

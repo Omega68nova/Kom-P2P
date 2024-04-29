@@ -1,6 +1,6 @@
 // Modules to control application life and create native browser window
-const {app, BrowserWindow} = require('electron')
-//const { PeerServer } = require("peer");
+const { app, BrowserWindow, Menu, ipcMain } = require('electron');
+//var PeerServer = require('peer').PeerServer;
 const path = require('path')
 
 function createWindow () {
@@ -39,7 +39,18 @@ function createWindow () {
   // Open the DevTools.
   // mainWindow.webContents.openDevTools()
 }
+/*
+ipcMain.on('renderer:createPeerServer',(e,[dir,IP,port])=>{
+  console.log([dir,IP,port])
+try{
+  var server = PeerServer({port: port, path: dir}); 
+}catch(err){
+  ipcMain.emit('main:createPeerServerFail',err)
+}
 
+server.on('connection', (client) => { console.log("Connected: "+client) });
+server.on('disconnect', (client) => { console.log("Disconnected: "+client) });
+})*/
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
