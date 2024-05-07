@@ -1,31 +1,39 @@
 /* styles.css */
 
 /* Add styles here to customize the appearance of your app */
+body{
+  background-color:rgb(33, 33, 38);
+  color:#f1f1f1;
+  scrollbar-color: rgb(134, 134, 142) rgb(79, 79, 83);
+  scrollbar-width: thin;
+}
 #chatForm{
     display: inline;
 }
 #container{
- width:990px; 
+  height: 540px;
 }
 
 .messageSender{
  position: fixed;
   bottom: 0;
   left: 15px;
-  background-color: rgb(255, 255, 255);
+  /*background-color: rgb(255, 255, 255);*/
 }
 #splitter{
  width:90px; 
  float:left;
 }
-
+div{
+  background-color:rgb(26, 26, 27);
+}
 #right{
     display:none;
     position: fixed;
     top: 50px;
     left: 7px;
-    background-color:#ffffff;
-    border: 3px solid #f1f1f1;
+    /*background-color:#ffffff;*/
+    border: 3px solid #3c3c3d;
     z-index: 9;
     width:600px;
     float:left;
@@ -39,18 +47,21 @@ body {font-family: Arial, Helvetica, sans-serif;}
 
 /* Button used to open the contact form - fixed at the bottom of the page */
 button{
-
     border: none;
     cursor: pointer;
 }
 image,img, video, audio{
   max-width: 300px;
+  height: relative;
 }
-
+.emote{
+  max-width: 32px;
+  max-height: 32px;
+}
 .open-button {
   background-color: #555;
-  color: white;
-  /*padding: 16px 20px;*/
+  /*color: rgb(82, 79, 79);
+  padding: 16px 20px;*/
   border: none;
   cursor: pointer;
   /*opacity: 0.8;
@@ -64,9 +75,9 @@ image,img, video, audio{
 .form-popup {
   display: none;
   position: fixed;
-  bottom: 0;
-  left: 15px;
-  border: 3px solid #f1f1f1;
+  bottom: 32px;
+  left: 16px;
+  /*border: 3px solid #f1f1f1;*/
   z-index: 9;
 }
 
@@ -74,7 +85,7 @@ image,img, video, audio{
 .form-container {
   max-width: 300px;
   padding: 10px;
-  background-color: white;
+
 }
 
 /* Full-width input fields */
@@ -83,18 +94,18 @@ image,img, video, audio{
   padding: 15px;
   margin: 5px 0 22px 0;
   border: none;
-  background: #f1f1f1;
+
 }
 
 /* When the inputs get focus, do something */
 .form-container input[type=text]:focus, .form-container input[type=password]:focus {
-  background-color: #ddd;
+
   outline: none;
 }
 
 /* Set a style for the submit/login button */
 .form-container .btn {
-  background-color: #04AA6D;
+  background-color: #6ca8d0;
   color: white;
   padding: 16px 20px;
   border: none;

@@ -40,10 +40,10 @@ function setPeerJsOptions(options){
 }
 var PEERJS_OPTIONS = {    
   
-  		'host': "127.0.0.1",
-		'port': 9005,
-		'path': "/myapp",
-  /*'iceServers': [
+  //		'host': "127.0.0.1",
+	//	'port': 9005,
+	//	'path': "/myapp",
+  'iceServers': [
   { 'urls': 'stun:stun.l.google.com:19302' },
   {
     'urls': "turn:omegachatapp.metered.live:80",
@@ -66,7 +66,7 @@ var PEERJS_OPTIONS = {
     'credential': "0WiOAZKfxs9jqcLT",
   }
 ], 
-'sdpSemantics': 'unified-plan' */
+'sdpSemantics': 'unified-plan' 
 };
  /* { 
 		//'host': "127.0.0.1",
@@ -435,9 +435,9 @@ class ConHandler{
         awaitConnectionFrom.forEach((id)=>{
           if(!this.cons.has(id)){
             this.cons.set(id,new ConData(id,null,"Normal","Off",this.rootId&&id===this.rootId||!this.rootId))
-            this.checkIfConnectedIn(id,1000)
+            this.checkIfConnectedIn(id,5000)
           }if(this.cons.get(id).state==="off"){
-            this.checkIfConnectedIn(id,1000)
+            this.checkIfConnectedIn(id,5000)
           }else{
             this.cons.get(id).type="Normal"
           }
@@ -775,7 +775,7 @@ class ConHandler{
               td.appendChild(document.createTextNode("RootConnection:"+this.rootCon[value[j]]));
             }
             else if(value[j]==="connection"&&this.rootCon[value[j]]){
-              td.appendChild(document.createTextNode(this.rootCon[value[j]].peer));
+              td.appendChild(document.createTextNode(this.rootCon[value[j]].open));
             }else
               td.appendChild(document.createTextNode(this.rootCon[value[j]]));
             tr.appendChild(td);
@@ -789,7 +789,7 @@ class ConHandler{
             var td = document.createElement('TD');
             td.width = '75';
             if(value[j]==="connection"&&user[value[j]]){
-              td.appendChild(document.createTextNode(user[value[j]].peer));
+              td.appendChild(document.createTextNode(user[value[j]].open));
             }else
               td.appendChild(document.createTextNode(user[value[j]]));
             tr.appendChild(td);

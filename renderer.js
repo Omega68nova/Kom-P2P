@@ -150,9 +150,19 @@ function joinPeerServer(){
 ], 
 'sdpSemantics': 'unified-plan' 
   })
-  hide('peerServer')
-  show('start');
-
+  let testPeer = new Peer(undefined,PEERJS_OPTIONS)
+  testPeer.on('open', function(id) {
+    console.log('My peer ID is: ' + id);
+    hide('peerServer')
+    show('start');
+    testPeer.close()
+    });
+    testPeer.on('error',function(err){
+      hide('start')
+      show('peerServer');
+      displayGeneralError("Error joining peerServer: "+err.type)
+      testPeer.close()
+    })
 }
 function createPeerServer(){
   let dir = document.getElementById("createServerName").value;
@@ -194,9 +204,20 @@ function createPeerServer(){
     console.log(server)
     server.on('connection', (client) => { console.log("Connected: "+client) });
     server.on('disconnect', (client) => { console.log("Disconnected: "+client) });
-  
+    let testPeer = new Peer(undefined,PEERJS_OPTIONS)
+  testPeer.on('open', function(id) {
+    console.log('My peer ID is: ' + id);
     hide('peerServer')
     show('start');
+    testPeer.close()
+    });
+    testPeer.on('error',function(err){
+      hide('start')
+      show('peerServer');
+      displayGeneralError("Error creating peerServer: "+err.type)
+      
+      testPeer.close()
+    })
   
   }catch(err){
     displayGeneralError(err)
@@ -350,6 +371,7 @@ class chatData{
       //}
       //chat.rootConHandler.cons.get(id).type="Normal"
       chat.rootConHandler.finishConSetup(id,onMessage,onDisconnect,onError,true)
+      //chat.rootConHandler.send({"command":"REQLOGS"},id)
 
     });
     console.log("Finished setting up rootFailure.")
@@ -437,7 +459,7 @@ class chatData{
 
         chat.rootFailureProtocol(chat.myName===chat.rootName||chat.users.findIndex(chat.rootName)!==-1||!chat.users.findUser(chat.rootName).online)
       }else{
-        chat.sendRoot({"command":'USRLOS',"name":chat.nameFromPeerID(id)})
+        chat.sendRoot({"command":'USRLOS',"name":name})
       }
     });
     this.conHandler = new ConHandler(chat.peerIDFromName(this.myName),preChat+this.name,function(){
@@ -497,7 +519,7 @@ class chatData{
     //check if user is in users first
     //logout from users, remove from tree, then if neighboors affected by change change connections
     //this.rootConHandler.sendAll({"command":'LOGOUT',"name":this.nameFromPeerID(id)})
-    //console.log("User logging out: "+ name)
+    console.log("User logging out: "+ name)
     //this.pre(insideAnother);
 
     let u=this.findUser(name);
@@ -509,6 +531,11 @@ class chatData{
         this.logs.push(event);
         u.online=false;
         this.conTree.remove(name);
+        if(this.conHandler.cons.has(this.peerIDFromName(name)))
+
+        if(this.rootName===this.myName&&this.rootConHandler&&this.rootConHandler.cons.has(this.peerIDFromName(name))){
+          try{this.rootConHandler.removeCon(this.peerIDFromName(name))}catch(e){}
+        }
         //if(name===this.adminName) this.rootFailureProtocol(undefined,true);
         this.updateConnections();
       }
@@ -697,7 +724,7 @@ class chatData{
           chat.logs.push({'date':data.date,'message':data.name+' logged out.'});
           chat.reSend(dataOld,from);
           break;
-      case 'USRLOS':
+     /* case 'USRLOS':
           if(chat.amRoot){
               chat.logout(data.name);
               addEventToChat(data.date,data.name+' logged out.',chat.name)
@@ -706,7 +733,7 @@ class chatData{
           }else{
               chat.reSend(dataOld,from);
           }
-          break;
+          break;*/
       
       case 'SNDMES':
           chat.logs.push({'from':data.from,'date':data.date,'message':data.message});
@@ -953,7 +980,7 @@ class chatData{
             if(data.type==="emote"){
               console.log("It is indeed a emote")
               console.log(path.extname(p))
-              if(!path.extname(p).match("^\.(jpg|jpeg|png|gif)$")){
+              if(!path.extname(p).match("^\.(jpg|jpeg|png|gif|webp)$")){
                 console.log("Not supported sadly.")
                 return;
               }
@@ -1023,6 +1050,8 @@ class chatData{
       case 'REMEMO':
         if(trueFrom==="root"||trueFrom===this.rootName)
           this.emotes.delete(data.name)
+          removeEmoteFromMenu(data.name)
+          this.updateAllEmotes(data.name)
         return true;
       case 'OFFEMO':
         console.log(trueFrom)
@@ -1168,8 +1197,6 @@ class chatData{
       return;
     }
 
-
-
     let meNode = this.conTree.find(this.myName);
     if(meNode){
       let parent = meNode.parentID()
@@ -1178,6 +1205,8 @@ class chatData{
       else awaitFrom = []
       let children = meNode.childrenIDs()
       this.conHandler.setNecessaryConnections(children.map((childName)=>chat.peerIDFromName(childName)),awaitFrom.map((childName)=>chat.peerIDFromName(childName)))
+    }else{
+      //chat.close()
     }
     chat.save()
   }
@@ -1207,8 +1236,9 @@ class chatData{
                 }else{
                   //let message ={'date':new Date().getTime(),'message':data.name+' logged out.'};
                   //chat.logs.push(message);
-  
-                  chat.sendAllRoot({"command":'LOGOUT',"name":data.name});
+                  let chatData ={"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(),"emotes": chat.emotesToObject(),"admin":chat.adminName,"root":chat.rootName};
+                  chat.sendAsRoot(chatData,from)
+                  chat.sendAsRoot(chatData,data.name)
                 }
                 break;
             case 'USRKEY':
@@ -1323,6 +1353,7 @@ class chatData{
     }
   }
   displayUsers(){
+    let chat = this;
     var table = document.createElement('TABLE');
     table.border = '1';
   
@@ -1346,9 +1377,37 @@ class chatData{
   
       for (var j = 0; j < names.length; j++) {
         var td = document.createElement('TD');
-        td.width = '75';
-        td.appendChild(document.createTextNode(user[value[j]]));
+        if(j===2){
+          let div = document.createElement("div");
+          div.style.display = "none";
+          div.appendChild(document.createTextNode(user[value[j]]));
+          let button = document.createElement("button");
+          button.innerHTML = "Show/Hide";
+          button.addEventListener ("click", function() {
+            if(div.style.display==="block"){
+              div.style.display = "none";
+            }else{ 
+              div.style.display = "block";
+            }
+          });
+          td.appendChild(div);
+          td.appendChild(button);
+        }else{
+          td.appendChild(document.createTextNode(user[value[j]]));
+
+          if(j===3&&chat.rootName===chat.myName&&user[value[j]]===true){
+            let button = document.createElement("button");
+            button.innerHTML = "Kick";
+            button.addEventListener ("click", function() {
+              chat.sendAllRoot({"command":"LOGOUT","name":user.name,"date":Date.now()})
+              displayGeneralError("User "+user.name+" kicked.")
+            });
+            td.appendChild(button);
+          }
+        }
         tr.appendChild(td);
+        
+
       }
     })
 
@@ -1747,21 +1806,42 @@ class chatData{
     if (!fs.existsSync(folderPath)) {
       return;
     }
-    if (fs.existsSync(configPath)) {
-      this.readConfig(JSON.parse(fs.readFileSync(configPath,{encoding:"ascii"})))
+    try{
+      if (fs.existsSync(configPath)) {
+        this.readConfig(JSON.parse(fs.readFileSync(configPath,{encoding:"ascii"})))
+      }
+    }catch(err){
+      console.log("Error loading config!")
+    } 
+    try{
+      if (fs.existsSync(logsPath)) {
+        this.loadLinks(JSON.parse(fs.readFileSync(linkPath,{encoding:"ascii"})))
+      }
+    }catch(err){
+      console.log("Error loading linked files!")
     }
-    if (fs.existsSync(logsPath)) {
-      this.loadLinks(JSON.parse(fs.readFileSync(linkPath,{encoding:"ascii"})))
-    }
+    try{
     if (fs.existsSync(usersPath)) {
       this.usersFromObject(JSON.parse(fs.readFileSync(usersPath,{encoding:"ascii"})),false)
     }
+  }catch(err){
+    console.log("Error loading users!")
+  }
+  try{
     if (fs.existsSync(emotesPath)) {
       this.emotesFromObject(JSON.parse(fs.readFileSync(emotesPath,{encoding:"ascii"})))
     }
+  }catch(err){
+    console.log("Error loading emotes!")
+  }
+  try{
     if (fs.existsSync(logsPath)) {
       this.logsFromObject(JSON.parse(fs.readFileSync(logsPath,{encoding:"ascii"})))
     }
+  }catch(err){
+    console.log("Error loading logs!")
+  }
+  
 
 
 
@@ -1961,7 +2041,7 @@ class chatData{
     let emoteList = document.getElementById("emoteList")
     emoteList.innerHTML=""
     this.emotes.forEach((value,key)=>{
-      emoteList.appendChild(this.displayEmote(key))
+      addEmoteToEmoteMenu(key,this.displayEmote(key))
     })
   }
   /////////////////////////EMOTE FUNCTIONS
@@ -2825,6 +2905,23 @@ function addEmoteToEmoteMenu(name,htmlElement){
   if(emotes.length!==0){
     emotes[0].parentNode.replaceChild(htmlElement,emotes[0])
     //eList.removeChild(emotes[0])
-  }else
-  eList.appendChild(htmlElement)
+  }else{
+    eList.appendChild(htmlElement)
+    if(chats.get(currentChat).myName===chats.get(currentChat).rootName){
+      let button = document.createElement("button");
+      button.innerHTML="x"
+      button.setAttribute('id', "emoteRemove_"+name);
+      button.addEventListener ("click", function() {
+        chats.get(currentChat).sendAllRoot({"command":"REMEMO","name":name})
+      });
+      eList.appendChild(button)
+    }
+
+  }
+  
+}
+function removeEmoteFromMenu(name){
+  let eList = document.getElementById("emoteList")
+  eList.removeChild(document.getElementById("emoteRemove_"+name))
+  eList.removeChild(eList.getElementsByClassName("emote_"+name)[0])
 }
