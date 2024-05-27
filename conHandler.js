@@ -38,11 +38,11 @@ class Queue {
 function setPeerJsOptions(options){
   PEERJS_OPTIONS = options
 }
-var PEERJS_OPTIONS = {    
-  
-  //		'host': "127.0.0.1",
-	//	'port': 9005,
-	//	'path': "/myapp",
+function resetPeerJsOptions(){
+  PEERJS_OPTIONS = Object.assign({}, DEFAULT_PEERJS_OPTIONS);
+}
+var DEFAULT_PEERJS_OPTIONS = {    
+
   'iceServers': [
   { 'urls': 'stun:stun.l.google.com:19302' },
   {
@@ -68,6 +68,7 @@ var PEERJS_OPTIONS = {
 ], 
 'sdpSemantics': 'unified-plan' 
 };
+var PEERJS_OPTIONS = Object.assign({}, DEFAULT_PEERJS_OPTIONS);
  /* { 
 		//'host': "127.0.0.1",
 		//'port': 9000,
@@ -105,7 +106,6 @@ class ConData{
   //State: Off, SettingUp, Validating, On, Special
                 //^on('data') ^needs from above ^For file transfer or other non mesh related connections.
 /**
- * 
  * @param {String} id The id of the peer you need to connect to.
  * @param {*} connection The connection, if it exists.
  * @param {String} type Accepts the following Strings: "Normal", "Special", "ToRoot", "AsRoot"
@@ -137,11 +137,10 @@ class ConData{
         if(connection){
           this.setCon(connection);
         }
-
     }
     send(data){
       if(this.state!=="Off"){
-        if(!this.connection||!this.connection.peer) {this.funcStorage.onDisconnect(this.id);}
+        if(!this.connection||!this.connection.peer) {this.funcStorage.onDisconnect(this.id);return;}
         this.connection.send(data)
       }else throw new Error("Connection not set yet!")
     }
@@ -205,16 +204,23 @@ class ConData{
         try{  
           conData.connection.send({"command":"PING"})
         }catch(err){
-          conData.connection.close()
+
+          if(this.connection){
+            this.connection.off('close',conData.funcStorage.onCloseOld)
+            conData.connection.close()
+          }
           console.log("Can't send message to "+conData.id)
-          conData.funcStorage.onCloseOld()
           window.clearInterval(conData.intervalID);
+          conData.funcStorage.onCloseOld()
         }
         if( ((Date.now()-conData.lastContactDate)/1000)>5){
           console.log("Connection timed out to "+conData.id)
-          conData.connection.close()
-          //conData.funcStorage.onCloseOld()
+          
           window.clearInterval(conData.intervalID);
+          conData.connection.close()
+          this.connection.off('close',conData.funcStorage.onCloseOld)
+          //conData.funcStorage.onCloseOld()
+
         }
         
       }
@@ -512,15 +518,6 @@ class ConHandler{
           conData.type="Normal"
         }
       }
-      resetCon(peerId){
-        let conData;
-        if(peerId ===this.rootId) conData=this.rootCon
-        else 
-          conData = this.cons.get(peerId);
-        if(conData){
-          conData.setCon(this.peer.connect(peerId,CON_OPTIONS))
-        }
-      }
 
       /**
        * @returns two items, connected users in the first, and users that are online but yet to connect in the second.
@@ -803,4 +800,4 @@ class ConHandler{
       }
 }
 //module.exports = {ConHandler, ConData,PEERJS_OPTIONS, CON_OPTIONS}
-export{ConHandler, ConData,PEERJS_OPTIONS, CON_OPTIONS,setPeerJsOptions}
+export{ConHandler, ConData,PEERJS_OPTIONS, CON_OPTIONS,setPeerJsOptions,resetPeerJsOptions}

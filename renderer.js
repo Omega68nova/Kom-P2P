@@ -20,7 +20,7 @@ const open = require('sqlite').open
 import {Peer} from "https://esm.sh/peerjs@1.5.2?bundle-deps"
 //const Peer = require('peerjs').Peer;
 import {P2PTreeNode,P2PTreeNodeTree, P2PMeshNode, P2PFullConnectedTopo} from "./topology.js"
-import {ConHandler, ConData, PEERJS_OPTIONS,CON_OPTIONS,setPeerJsOptions} from "./conHandler.js"
+import {ConHandler, ConData, PEERJS_OPTIONS,CON_OPTIONS,setPeerJsOptions,resetPeerJsOptions} from "./conHandler.js"
 //var  = require("./conHandler.js").PEERJS_OPTIONS
 
 import {encryptWithPublicKey,decryptWithPrivateKey,sign,verify,generateKeys,importKey,exportKey} from "./crypto.js"
@@ -98,11 +98,17 @@ window.onload = function () {
   });
   document.querySelector("#createPeerServerButton").addEventListener('click', e => {
     e.preventDefault();
-    createPeerServer()
+    let dir = document.getElementById("createServerName").value;
+    let IP = document.getElementById("createServerIP").value;
+    let port =document.getElementById("createServerport").value;
+    createPeerServer(dir,port)
   });
   document.querySelector("#joinPeerServerButton").addEventListener('click', e => {
     e.preventDefault();
-    joinPeerServer();
+    let dir = document.getElementById("createServerName").value;
+    let IP = document.getElementById("createServerIP").value;
+    let port =document.getElementById("createServerport").value;
+    joinPeerServer(dir,IP,port);
   });
 
   show('peerServer')
@@ -117,10 +123,7 @@ function setPeerServerToDefault(){
   hide('peerServer')
   show('start');
 }
-function joinPeerServer(){
-  let dir = document.getElementById("createServerName").value;
-  let IP = document.getElementById("createServerIP").value;
-  let port =document.getElementById("createServerport").value;
+function joinPeerServer(dir,IP,port){
   setPeerJsOptions({
     'host': IP,
 		'port': port,
@@ -161,15 +164,11 @@ function joinPeerServer(){
       hide('start')
       show('peerServer');
       displayGeneralError("Error joining peerServer: "+err.type)
+      resetPeerJsOptions()
       testPeer.close()
     })
 }
-function createPeerServer(){
-  let dir = document.getElementById("createServerName").value;
-  let IP = document.getElementById("createServerIP").value;
-  let port =document.getElementById("createServerport").value;
-
-    console.log([dir,IP,port])
+function createPeerServer(dir,port){
   try{
     var server = PeerServer({port: port, path: dir}); 
     setPeerJsOptions({
@@ -209,15 +208,20 @@ function createPeerServer(){
     console.log('My peer ID is: ' + id);
     hide('peerServer')
     show('start');
-    testPeer.close()
     });
     testPeer.on('error',function(err){
       hide('start')
       show('peerServer');
       displayGeneralError("Error creating peerServer: "+err.type)
+      resetPeerJsOptions()
       
-      testPeer.close()
+      testPeer.destroy()
     })
+    window.setTimeout(function(){
+      try{
+        testPeer.destroy()
+      }catch(err){}
+    },2000)
   
   }catch(err){
     displayGeneralError(err)
@@ -289,7 +293,7 @@ class chatData{
     }
 
 
-    this.users.push(new user(2,this.myName,this.puKey,true));
+    this.users.push(new user(0,this.myName,this.puKey,true));
     this.load();
     this.normalCommunicator = new EventEmitter();
     this.conTree = new P2PTreeNodeTree(chat.myName);
@@ -541,7 +545,7 @@ class chatData{
       }
     }else{
       //this.post(insideAnother);
-      throw new Error('User not found!');
+      //throw new Error('User not found!');
     }
     //this.post(insideAnother);
   }
@@ -708,7 +712,7 @@ class chatData{
             chat.conHandler.sendTo([from],{"command":"ERR",'message':"Tried to fake message!"});
             return;
           }
-          let u = new user(1,data.name,data.puKey,true);
+          let u = new user(2,data.name,data.puKey,true);
           chat.addUser(u);
           addEventToChat(data.date,data.name+' joined the chat.',chat.name);
           chat.logs.push({'date':data.date,'message':data.name+' joined the chat.'});
@@ -738,7 +742,7 @@ class chatData{
       case 'SNDMES':
           chat.logs.push({'from':data.from,'date':data.date,'message':data.message});
           let m = new Message(data.from,data.date,data.message);   
-          addToChat(m);
+          addToChat(chat.name,m);
           chat.reSend(dataOld,from);
           break;
       case 'GIVDAT':
@@ -977,7 +981,7 @@ class chatData{
               "size":data.size,
               "from":chat.nameFromPeerID(trueFrom)
             }
-            if(data.type==="emote"){
+            if(data.isEmote){
               console.log("It is indeed a emote")
               console.log(path.extname(p))
               if(!path.extname(p).match("^\.(jpg|jpeg|png|gif|webp)$")){
@@ -985,6 +989,7 @@ class chatData{
                 return;
               }
               //If emote exists assign link to emote
+              
                 if(!transfer2.emoteName){
                   this.emotes.forEach((link,emote)=>{
                     if(data.filename===link){
@@ -1007,8 +1012,10 @@ class chatData{
                     return;
                   }
                 }
+                let name="";
                 if(chat.emotes.has(transfer2.emoteName)){
-                  chat.emotes.set(transfer2.emoteName,chat.loadLink(d,true))
+                  name = chat.loadLink(d,true)
+                  chat.emotes.set(transfer2.emoteName,name)
                   addEmoteToEmoteMenu(transfer2.emoteName,this.displayEmote(transfer2.emoteName))
                   chat.updateAllEmotes(transfer2.emoteName)
                   console.log("Emote found, adding.")
@@ -1021,15 +1028,16 @@ class chatData{
                     }
                     console.log("Done adding.")
                 }
-            }else{
+                try{chat.displayFile(name)}catch(e){}
+            }
+            if(!data.isEmote){
               let name= this.loadLink(d,true)
               chat.displayFile(name)
-              let i = chat.fileTransfers.findIndex(transfer=>transfer.peer===username&&transfer.action==="r"&&transfer.file===name);
-              if(i)
-                chat.fileTransfers.splice(i)
             }
-   
           }
+          let i = chat.fileTransfers.findIndex(v=>v.file===data.filename&&v.action==="r"&&v.peer===trueFrom)
+          if(i)
+            chat.fileTransfers.splice(i)
         })
 
 
@@ -1080,7 +1088,8 @@ class chatData{
       action: "r",
       file: link,
       emoteName:name,
-      stream: null
+      stream: null,
+      isEmote:true
     }
     f.peer=trueFrom;
     console.log(trueFrom)
@@ -1232,13 +1241,16 @@ class chatData{
                 console.log("User lost!");
                 if(this.rootConHandler.cons.has(data.name)&&this.rootConHandler.cons.get(data.name).state!=="Off"){
                   let chatData ={"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(),"emotes": chat.emotesToObject(),"admin":chat.adminName,"root":chat.rootName};
+                  if(this.conTree.find(this.nameFromPeerID(from)).connected.includes(this.nameFromPeerID(data.name))){
+                    chat.sendAsRoot(chatData,data.name)
+                  }
                   chat.sendAsRoot(chatData,from)
                 }else{
                   //let message ={'date':new Date().getTime(),'message':data.name+' logged out.'};
                   //chat.logs.push(message);
                   let chatData ={"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(),"emotes": chat.emotesToObject(),"admin":chat.adminName,"root":chat.rootName};
                   chat.sendAsRoot(chatData,from)
-                  chat.sendAsRoot(chatData,data.name)
+                  //chat.sendAsRoot(chatData,data.name)
                 }
                 break;
             case 'USRKEY':
@@ -1246,6 +1258,9 @@ class chatData{
               break;
             case 'USRDAT':
                 let chatData2 ={"command":"GIVDAT","tree":chat.conTree.toObject(),"users":chat.usersToObject(),"emotes": chat.emotesToObject(),"admin":chat.adminName,"root":chat.rootName};
+                if(u.puKey!==data.puKey){
+                  this.sendAllRoot({'command':"KEYCHG",'name':from,'puKey':data.puKey})
+                }
                 console.log("ASKDATA RECEIVED. Sending")
                 this.sendAsRoot(chatData2,from)
               break;
@@ -1273,12 +1288,15 @@ class chatData{
             }
             if(uState === "offline"){
               if(chat.pass===data.pass){
-                u.puKey=importKey(data.puKey)
+                if(u.puKey!==data.puKey){
+                  this.sendAllRoot({'command':"KEYCHG",'name':from,'puKey':data.puKey})
+                }
                 chat.login(u.name);
                 message={"command":'LOGINN',"name":chat.nameFromPeerID(from)};
               }else{
-                  //this.sendAsRoot({"command":"BADLOG"},from)
-                  //this.rootConHandler.removeCon(from);
+
+                  this.sendAsRoot({"command":"BADLOG"},from)
+                  this.rootConHandler.removeCon(from);
                   return;
                 }
             }
@@ -1585,7 +1603,7 @@ class chatData{
       }).on('end', function() {
         sendF({"command":"FILEND","filename":filename,"date":link.date,
         "type":link.type,
-        "size":link.size},chat.peerIDFromName(username))
+        "size":link.size,"isEmote":true&&link.isEmote},chat.peerIDFromName(username))
         let i = chat.fileTransfers.findIndex(transfer=>transfer.peer===username&&transfer.action==="s"&&transfer.file===filename);
         if(i)
           chat.fileTransfers.splice(i)
@@ -1602,7 +1620,8 @@ class chatData{
  */
   displayShareLink(trueFrom,filename,size){
     let chat=this;
-
+    if(currentChat!=chat.name)
+      return
     if(document.getElementById("chatfile-"+filename)){
       document.getElementById("chatfile-"+filename).outerHTML = "";
     }
@@ -1629,7 +1648,7 @@ class chatData{
       li.appendChild(messageText);
       li.appendChild(button);
     }
-    addElementToChat(li)
+    addElementToChat(chat.name,li)
     if(trueFrom===this.myName||this.fileLinks.get(filename)){
       this.displayFile(filename)
     }
@@ -1637,9 +1656,10 @@ class chatData{
   displayFile(filename){
     let file = this.fileLinks.get(filename);
     if(!file){
-      console.log("File "+filename+" not found.")
+      console.log(new Error("File "+filename+" not found."))
       return;
     }
+    try{
     if(file.from!==this.myName)
       document.getElementById("chatFileButton-file-"+filename).innerHTML = "Downloaded"
 
@@ -1665,6 +1685,7 @@ class chatData{
       document.getElementById("chatfile-"+filename).appendChild(video)
     }else
     {}
+  }catch(err){console.log(err)}
   }
   shareFileLink(name){
     let file = this.fileLinks.get(name)
@@ -1681,7 +1702,7 @@ class chatData{
     this.logs.push({"from":this.myName,"file":name,"size":file.size,"date":Date.now()})
     this.displayShareLink(this.myName,name,file.size)
   }
-  makeFileLink(file){
+  makeFileLink(file,isEmote=false){
     let name = this.myName+":"+file.name;
     let data = {
       "name":name,
@@ -1689,7 +1710,8 @@ class chatData{
       "date":file.lastModified,
       "type":file.type,
       "size":file.size,
-      "from":this.myName
+      "from":this.myName,
+      "isEmote":isEmote
     }
     name= this.loadLink(data,true)
     return name;
@@ -1857,8 +1879,10 @@ class chatData{
         if(hasPriority){
           f.date=linkObject.date
           f.size=linkObject.size
+          if(linkObject.isEmote)
+            f.isEmote=true
         }
-        return;
+        return linkObject.name;
       }else{
         if(linkObject.name.match("$[(][0-9]+[)]")){
           let splitted=linkObject.name.split("(");
@@ -1874,7 +1898,8 @@ class chatData{
         "date":linkObject.date,
         "type":linkObject.type,
         "size":linkObject.size,
-        "from":linkObject.from
+        "from":linkObject.from,
+        "isEmote":true&&linkObject.isEmote
       });
       console.log("Link to "+linkObject.name+" loaded:")
       console.log(this.fileLinks.get(linkObject.name))
@@ -2001,12 +2026,12 @@ class chatData{
     if(config.adminName){
       this.adminName=config.adminName;
     }
-    if(config.name){
-      this.name=config.name;
-    }
-    if(config.pass){
+    //if(config.name){
+      //this.name=config.name;
+    //}
+    //if(config.pass){
       this.pass=config.pass;
-    }
+    //}
     if(config.myName){
       this.myName=config.myName;
     }
@@ -2145,10 +2170,10 @@ class chatData{
 
   }
   shareEmote(name,selectedFile){
-    selectedFile.type="emote";
+    //selectedFile.type="emote";
     console.log("selectedFile")
     console.log(selectedFile)
-    let link = this.makeFileLink(selectedFile)
+    let link = this.makeFileLink(selectedFile,true)
     this.sendRoot({'command':"OFFEMO","name":name,"link":link})
   }
   ////OTHER
@@ -2220,8 +2245,8 @@ function setupUser(username,settings){
   //let a = sign("hello",  me.prKey, username, password)//, me.username,me.password)
   //let b = verify(a,"hello", me.puKey);
   //console.log(b)
-  me.peerJsOptions=settings.peerJsOptions;
-  me.peer = new Peer(pre.concat(username),me.peerJsOptions);
+  //me.peerJsOptions=settings.peerJsOptions;
+  me.peer = new Peer(pre.concat(username),PEERJS_OPTIONS);
   me.peer.on('error',function(err){
     console.log(err);
     if(err.type==='unavailable-id'||err.type==='invalid-id'){
@@ -2244,7 +2269,6 @@ function setupUser(username,settings){
         me.dmLogs.push({command:"/invite",args:[sender,data.date,data.chatId,data.pass,false]})
         displayInvite(sender,data.date,data.chatId,data.pass,false);
       }
-      // TO-DO: cyphering of DMs
       if(data.command==="DM"){
         
         me.dmLogs.push({command:"/dm",args:[sender,me.username,data.message,data.date]})
@@ -2308,7 +2332,6 @@ function createChat(chatName,chatPass){
     chat.close();
     chatClose(chatName);
   });
-
 }
 
 //Step 2.B: Join a chat.
@@ -2445,10 +2468,13 @@ function saveSession(username){
 
 
 //Add messages to chat
-function addElementToChat(e){
-  document.getElementById("chatBox").appendChild(e);
+function addElementToChat(chatName,e){
+  if(chatName===currentChat)
+    document.getElementById("chatBox").appendChild(e);
 }
-function addToChat(message){
+function addToChat(chatName,message){
+    if(chatName!==currentChat)
+      return;
     let chat= chats.get(currentChat)
     let li=document.createElement("li");
     li.setAttribute('id',message.id);
@@ -2485,7 +2511,9 @@ function addToChat(message){
     document.getElementById("chatBox").appendChild(li);
 
 }
-function addEventToChat(date,message,chat=undefined){
+function addEventToChat(date,message,chat){
+  if(chatName!==currentChat)
+    return;
   if(chat&&chat!==currentChat) return
   let li=document.createElement("li");
   //li.setAttribute('id',mParsed.id); no need for a ID
@@ -2613,7 +2641,7 @@ function chatSendMessage(){
   let chat=chats.get(currentChat);
   chat.sendMessage(date,message)
   console.log('Message sent:', message);
-  addToChat(new Message(myID,date,message));
+  addToChat(currentChat,new Message(myID,date,message));
   document.querySelector("#chatMessageInput").value="";
 }
 
@@ -2743,12 +2771,12 @@ function resetChat(logs){
       }else{
         console.log("ITS A MESSAGE")
         let m= new Message(item.from,item.date,item.message)
-        addToChat(m);
+        addToChat(currentChat,m);
       }
 
     }else{
       console.log("ITS A EVENT")
-      addEventToChat(item.date,item.message);
+      addEventToChat(item.date,item.message,currentChat);
       i=i+1;
     }
   });
@@ -2759,19 +2787,21 @@ function resetChat(logs){
 //var stayAmmount = 0;
 
 
-async function displayGeneralError(data){
-  document.getElementById("ErrorText").innerHTML=data;
-
+function displayGeneralError(data){
   let stayAmmount= 5000;
-
-    fadeInEffect("ErrorText");
-    window.setTimeout(function(){
-      fadeOutEffect("ErrorText");
-      document.getElementById("ErrorText").innerHTML="";
-    },stayAmmount)
-  
+  document.getElementById("ErrorText").innerHTML=data;
+  console.log(data)
+  sleep(stayAmmount);
+  setTimeout(()=>{
+    if(document.getElementById("ErrorText").innerHTML===data)
+            document.getElementById("ErrorText").innerHTML="";
+  },5000);
 }
-document.getElementById("ErrorText").addEventListener('click', fadeOutEffect);
+document.getElementById("ErrorText").addEventListener('click',function(){
+  document.getElementById("ErrorText").innerHTML=""
+});
+
+
 function fadeOutEffect(name) {
   var fadeTarget = document.getElementById(name);
   if (!fadeTarget.style.opacity) {
@@ -2882,7 +2912,7 @@ function chatShareEmote(){
     path:selectedFile.path,
     lastModified:selectedFile.lastModified,
     size:selectedFile.size,
-    type:"emote"
+    type:selectedFile.type
 
   }
   console.log( document.getElementById("emoteUpload").files[0])

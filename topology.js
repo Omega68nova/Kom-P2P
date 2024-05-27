@@ -130,6 +130,7 @@ class P2PTreeNodeTree {
     return -1;
   }
 
+
   /**
    * Removes a node from the tree without breaking it.
    * @param {String} id The username of the node.
@@ -372,7 +373,10 @@ class P2PFullConnectedTopo {
 
 
   insert(id) {
-    return this.IDs.push(id);
+    this.IDs.push(id);
+    return  new P2PMeshNode(id, this.IDs.slice(undefined,-1), []);
+ 
+
   }
   /**
    *   If element not found, returns -1, else it returns the position of the in the tree counted layer by layer from left to right:
@@ -391,7 +395,9 @@ class P2PFullConnectedTopo {
   remove(id) {
     let pos = this.getPosN(id);
     let val = this.IDs.splice(pos)
-    return (val.length!==0);
+    if(val.length===1)
+      return val
+    return null
   } 
 
   /**
@@ -403,7 +409,7 @@ class P2PFullConnectedTopo {
     let pos = this.getPosN(id);
     if(pos===-1)return -1;
     this.IDs[pos]=id;
-    return pos;
+    return new P2PMeshNode(id, this.IDs.slice(undefined,pos), this.IDs.slice(pos+1));
   }
   /**
    * Replaces the past root with another node of the tree.
@@ -418,14 +424,15 @@ class P2PFullConnectedTopo {
       this.IDs[0]=id;
       this.IDs[ofPos]=currentRoot;
     }
-    return ofPos
+    return  new P2PMeshNode(this.IDs[ofPos], this.IDs.slice(undefined,ofPos), this.IDs.slice(ofPos));
   }
   /**Looks for a node by its id, if it doesnt exist it returns null instead.
    * @param {String} id The id of the node in the chat, without the common part of all members (their username).
    * @returns {Number} The postion of the node, -1 if not in.
   */
   find(id) {
-    return this.getPosN(id)
+    let pos = this.getPosN(id)
+    return new P2PMeshNode(id, this.IDs.slice(undefined,pos), this.IDs.slice(pos+1));
   }
 
   /**
