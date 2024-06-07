@@ -136,6 +136,7 @@ class P2PTreeNodeTree {
    * @param {String} id The username of the node.
    */
   remove(id) {
+    console.log("Removing user from topology:"+id)
     if(id===this.root.id && this.root.isLeaf()){
       //throw new Error("Can't remove only node in tree!");
       this.root=null;
@@ -145,15 +146,16 @@ class P2PTreeNodeTree {
       this.root=this.replaceNode(this.root);
       return true;
     }
+    console.log("Removing user from topology:"+id)
     for (let node of this.preOrderTraversal()) {
-      
-      if (node.left.id === id) {
+      console.log("Removing user from topology:"+id)
+      if (node.left && node.left.id && node.left.id === id) {
         if (!node.left.isLeaf()) {
           node.left=this.replaceNode(node.left);
         }else {node.left=null;}
         return true;
       }
-      if (node.right.id === id) {
+      if (node.right && node.right.id && node.right.id === id) {
         if (!node.right.isLeaf()) {
           node.rigth=this.replaceNode(node.right);
         }else {node.right=null;}
@@ -375,8 +377,6 @@ class P2PFullConnectedTopo {
   insert(id) {
     this.IDs.push(id);
     return  new P2PMeshNode(id, this.IDs.slice(undefined,-1), []);
- 
-
   }
   /**
    *   If element not found, returns -1, else it returns the position of the in the tree counted layer by layer from left to right:

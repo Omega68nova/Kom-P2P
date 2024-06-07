@@ -16,7 +16,6 @@ function decryptWithPrivateKey(toDecrypt, privateKey, user, pass) {
             key: privateKey.toString(),
             passphrase: user+pass,
         },
-        //privateKey,
         buffer,
     )
     return decrypted.toString("utf8");

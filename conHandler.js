@@ -140,7 +140,7 @@ class ConData{
     }
     send(data){
       if(this.state!=="Off"){
-        if(!this.connection||!this.connection.peer) {this.funcStorage.onDisconnect(this.id);return;}
+        if(!this.connection||!this.connection.peer) {this.funcStorage.onDisconnect(this.id);this.state="Off";return;}
         this.connection.send(data)
       }else throw new Error("Connection not set yet!")
     }
@@ -213,18 +213,19 @@ class ConData{
           window.clearInterval(conData.intervalID);
           conData.funcStorage.onCloseOld()
         }
-        if( ((Date.now()-conData.lastContactDate)/1000)>5){
+        if( ((Date.now()-conData.lastContactDate)/1000)>3){
           console.log("Connection timed out to "+conData.id)
-          
           window.clearInterval(conData.intervalID);
-          conData.connection.close()
-          this.connection.off('close',conData.funcStorage.onCloseOld)
-          //conData.funcStorage.onCloseOld()
+          if(this.connection){
+            this.connection.off('close',conData.funcStorage.onCloseOld)
+            conData.connection.close()
+          }
+          conData.funcStorage.onCloseOld()
 
         }
         
       }
-      if(this.important)this.intervalID = window.setInterval(myCallback, 2000);
+      if(this.important)this.intervalID = window.setInterval(myCallback, 1000);
       
       }
     }
@@ -367,7 +368,8 @@ class ConHandler{
             conHandler.eventCommunicator.emit('peerErr',{'err':"Error with user chat detected. This might be nothing, or it might be fatal to the ability to connect to other users. If so, please notify the app developer."});
           }
            if(err.type==='network'){
-            conHandler.peer.reconnect()
+            console.log(new Error(err))
+            //conHandler.peer.reconnect()
           }
         });
         conHandler.peer.on('disconnected',function(){
@@ -405,7 +407,7 @@ class ConHandler{
         console.log("Await connection:"+awaitConnectionFrom)
         if(this.peer.id===null){
           this.peer.destroy();
-          this.peer.disconnect();
+          //this.peer.disconnect();
           this.peer = new Peer(this.peerId, PEERJS_OPTIONS);
           this.setupPeer(function(){setNecessaryConnections(connectTo, awaitConnectionFrom)})
           return;
@@ -432,8 +434,7 @@ class ConHandler{
             let con = this.peer.connect(id,CON_OPTIONS);
             this.cons.get(id).type="Normal"
             this.setupNormalCon(id,con)
-          }
-          if(this.cons.get(id).type==="Special"){
+          }else if(this.cons.get(id).type==="Special"){
             this.cons.get(id).type="Normal"
             this.setupNormalCon(id)
           }
@@ -446,6 +447,7 @@ class ConHandler{
             this.checkIfConnectedIn(id,5000)
           }else{
             this.cons.get(id).type="Normal"
+            this.setupNormalCon(id)
           }
         });
       }
@@ -478,7 +480,7 @@ class ConHandler{
         let cData = this.cons.get(id)
         if(!cData){
           if(con){
-            let cData= new ConData(id,con,"Special","SettingUp",this.rootId&&id===this.rootId||!this.rootId);
+            cData= new ConData(id,con,"Special","SettingUp",this.rootId&&id===this.rootId||!this.rootId);
             this.cons.set(id,cData)
           }else  throw new Error("SetupNormalCon @ conHandler for con "+id+": connection list doesnt include connection and none was given.")
         }else{
@@ -488,16 +490,15 @@ class ConHandler{
           }
         }
 
-        if(con.open){
+        if(cData.connection&&cData.connection.open){
           this.cons.get(id).state="Validating";
           this.eventCommunicator.emit("validateAndFinishSetup",[id]);
           
         }else{
           let conHandler = this;
-          con.on('open',function(){
+          cData.connection.on('open',function(){
             conHandler.cons.get(id).state="Validating";
             conHandler.eventCommunicator.emit("validateAndFinishSetup",[id]);
-            
           })
         }
       }
@@ -517,6 +518,7 @@ class ConHandler{
         if (forceNormal){
           conData.type="Normal"
         }
+        this.unloadBacklog(peerId)
       }
 
       /**
@@ -537,13 +539,13 @@ class ConHandler{
       unloadBacklog(peerId){
         let [connected, yetToConnect] = this.getOnAndConUsers();
         let sendGeneralMessages = yetToConnect.length===0
-        let i = 0;
-        while (i<this.backlog.length){
+        let i = this.backlog.length-1;
+        while (i>=0){
           if(((!this.backlog[i][2])&&sendGeneralMessages)||this.backlog[i][2]===peerId){
             this[this.backlog[i][0]](this.backlog[i][1],this.backlog[i][2])
             this.backlog.splice(i)
           }else
-          i++;
+          i--;
         }
       }
 

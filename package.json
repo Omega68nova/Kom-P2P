@@ -1,11 +1,11 @@
 {
-  "name": "ubiquitous-value-replace-tt7lg",
-  "productName": "ubiquitous-value-replace-tt7lg",
-  "description": "My Electron application description",
+  "name": "P2PChatApp",
+  "productName": "OmegaChatApp",
+  "description": "Omega's P2P chat app.",
   "keywords": [],
   "main": "./main.js",
   "version": "1.0.0",
-  "author": "Isaac Pavo",
+  "author": "Omega68",
   "scripts": {
     "start": "electron-forge start",
     "package": "electron-forge package",
