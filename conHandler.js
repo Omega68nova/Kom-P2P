@@ -485,8 +485,10 @@ class ConHandler{
           }else  throw new Error("SetupNormalCon @ conHandler for con "+id+": connection list doesnt include connection and none was given.")
         }else{
           
-          if(con&&cData.state==="Off"){
-            cData.setCon(con)
+          if(con//&&cData.state==="Off"
+            ){
+            cData.state="SettingUp";
+            cData.setCon(con);
           }
         }
 
@@ -494,12 +496,14 @@ class ConHandler{
           this.cons.get(id).state="Validating";
           this.eventCommunicator.emit("validateAndFinishSetup",[id]);
           
-        }else{
+        }else if(cData.connection){
           let conHandler = this;
           cData.connection.on('open',function(){
             conHandler.cons.get(id).state="Validating";
             conHandler.eventCommunicator.emit("validateAndFinishSetup",[id]);
           })
+        }else{
+          throw new Error("Can't setup connection if there was none to begin with.")
         }
       }
 

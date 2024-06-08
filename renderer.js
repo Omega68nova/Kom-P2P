@@ -315,7 +315,11 @@ class chatData{
         }
         
         chat.rootConHandler=undefined;
-        chat.setupConHandler(onComplete,onFailure);
+        chat.setupConHandler(onComplete,
+          function(){
+            displayGeneralError('Chat with name '+chatName+' could not be created or joined; name must only be made out of letters, spaces and numbers, and password must match the set one if joining.');
+          onFailure()
+        });
       }
         //onFailure
         );
@@ -454,6 +458,12 @@ class chatData{
         chat.conHandler.restartRootCon(function(){
           
           console.log("Root succesfully reset connections to.")
+          chat.isRoot=true;
+          //chat.conTree.makeNewRoot(chat.myName);
+          chat.logout(chat.rootName);
+          chat.rootName= chat.myName;
+          if(forced)
+            chat.rootConHandler.setNecessaryConnections(chat.users.map(v=>v.name),[]);
         })
       }catch(err){
         console.log(err)
@@ -526,6 +536,14 @@ class chatData{
     //check if user is in users first
     //logout from users, remove from tree, then if neighboors affected by change change connections
     //this.rootConHandler.sendAll({"command":'LOGOUT',"name":this.nameFromPeerID(id)})
+    if(name===this.myName){
+      displayGeneralError("Kicked from "+this.name+".")
+      this.close()
+      this.onSuddenClose()
+      this.close()
+      this.onSuddenClose()
+      return;
+    }
     console.log("User logging out: "+ name)
     //this.pre(insideAnother);
 
@@ -1372,7 +1390,7 @@ class chatData{
         case 'LOGOUT':
 
             chat.logout(data.name);
-
+            
             chat.updateConnections()
             //chat.sendAllRoot(data);
             break;
@@ -1469,10 +1487,11 @@ class chatData{
     this.close()
     this.onSuddenClose()
     this.close()
+    return;
+    /*
     let chat = this;
-
-
-   /* console.log("Beginning root failure protocol.")
+    
+   console.log("Beginning root failure protocol.")
     if(this.isRoot&&!forced){
       this.updateConnections();
       return;
@@ -1490,16 +1509,12 @@ class chatData{
     chat.rootConHandler = new ConHandler(preChat+chat.name,undefined,function(){
       console.log("Success creating new root peer, retrying to set up connection to root.")
       if(chat.rootName!=chat.myName&&chat.rootConHandler.peer.id){
-        chat.isRoot=true;
-        //chat.conTree.makeNewRoot(chat.myName);
-        chat.logout(chat.rootName);
-        chat.rootName= chat.myName;
-        if(forced)
-          chat.rootConHandler.setNecessaryConnections(chat.users.map(v=>v.name),[]);
+        chat.normalCommunicator.emit("resetUpRootCon")
+       
       }
-      chat.normalCommunicator.emit("resetUpRootCon")
+      
     },chat.rootCommunicator)
-    */
+    
     /*console.log("Beginning root failure protocol.")
     if(this.isRoot&&!forced){
       this.updateConnections();
@@ -2376,6 +2391,10 @@ function setupUser(username,settings){
 
 function createChat(chatName,chatPass){
   //Star chat Peer
+  if(!chatName.match("^[a-zA-Z0-9]*$")){
+    displayGeneralError('Invalid chat name. Name must only include numbers and letters.')
+    return;
+  }
   let chat  = new chatData(chatName,chatPass,me.username,me.puKey,me.prKey,true,function(){
     currentChat2=chatName;
     chats.set(chat.name,chat);
@@ -2494,7 +2513,7 @@ function saveSession(username){
     })*/
     let chatsPath = path.join('.', 'UserData', username, 'onlineChats.json');
     let chatList=[]
-    chats.forEach((chat,name)=>chatList.push({'name':name,'pass':chat.pass}))
+    chats.forEach((chat,name)=>{if(chat)chatList.push({'name':name,'pass':chat.pass})})
     fs.writeFileSync(chatsPath, JSON.stringify(chatList))
     console.log(JSON.stringify(chatList))
     /*, err => {
@@ -2638,13 +2657,14 @@ function chatClose(chatName){
   if (button2)
     button2.remove();
     let chat=chats.get(chatName);
-    if (!chat){
-      displayGeneralError('Chat with name '+chatName+' does not exist.');
-    }else{
-      chat.close();
+    //if (!chat){
+      //displayGeneralError('Chat with name '+chatName+' does not exist.');
+    //}else{
+    try{
       chats.delete(chatName);
+      chat.close();
       saveSession(me.username)
-    }
+    }catch(e){console.log(e)}
     if(currentChat2===chatName){
       currentChat2=null;
     }
@@ -2788,7 +2808,7 @@ function inviteToChat(user, time, chat){
   }
   console.log("Chat:"+chat)
   var c =chats.get(chat);
-  if (!c){displayDmErr("User is not in this chat."); return;}
+  if (!c){displayDmErr("User is not in chat. Can't invite other users to a place where you aren't."); return;}
   if (c.canUser(c.myName,"invite")) {
     let con =me.peer.connect(pre+user,{"serialization":"json"});
     con.on('error', function(err){
