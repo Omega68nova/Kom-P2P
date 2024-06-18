@@ -2533,7 +2533,13 @@ function saveSession(username){
         // file written successfully
       }
     })*/
-    chats.forEach(chat=>chat.save())
+    chats.forEach((chat,name)=>{
+      if(chat&&chat.myName)
+        chat.save()
+      else{
+        chats.delete(name)
+      }
+    })
 
 }
 

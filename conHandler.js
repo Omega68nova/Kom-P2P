@@ -491,7 +491,9 @@ class ConHandler{
             cData.setCon(con);
           }
         }
-
+        if(!cData.connection){
+          cData.setCon(con);
+        }
         if(cData.connection&&cData.connection.open){
           this.cons.get(id).state="Validating";
           this.eventCommunicator.emit("validateAndFinishSetup",[id]);
@@ -503,7 +505,8 @@ class ConHandler{
             conHandler.eventCommunicator.emit("validateAndFinishSetup",[id]);
           })
         }else{
-          throw new Error("Can't setup connection if there was none to begin with.")
+          cData.state="Off"
+          console.log( new Error("Can't setup connection if there was none to begin with."))
         }
       }
 
