@@ -730,11 +730,12 @@ class ConHandler{
       /**
        * Closes its event communicator and peer.
        */
-      close(){
+      async close(){
         
         this.eventCommunicator.removeAllListeners()
         if (this.peer){
-          this.peer.disconnect()
+          await this.peer.disconnect()
+          console.log("Disconnected")
           if(this.rootCon){
             this.rootCon.close();
           }

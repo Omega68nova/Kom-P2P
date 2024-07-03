@@ -121,8 +121,8 @@ window.onload = function () {
   hide('emoteMenu');
 };
 function setPeerServerToDefault(){
-  hide('peerServer')
-  show('start');
+
+  changeMode('start')
 }
 function joinPeerServer(dir,IP,port){
   setPeerJsOptions({
@@ -157,13 +157,22 @@ function joinPeerServer(dir,IP,port){
   let testPeer = new Peer(undefined,PEERJS_OPTIONS)
   testPeer.on('open', function(id) {
     console.log('My peer ID is: ' + id);
-    hide('peerServer')
-    show('start');
+    changeMode('start')
     testPeer.close()
     });
     testPeer.on('error',function(err){
-      hide('start')
-      show('peerServer');
+      if(me.username){
+        saveSession(me.username)
+        document.getElementById("username").innerText="";
+        document.getElementById('DMsButton').disabled = true;
+        document.getElementById('plus').disabled = true;
+        chats.forEach((v,k,m)=>{
+          chatClose(k,false)
+          m.delete(k)
+        })
+        me={}
+      }
+      changeMode('peerServer')
       displayGeneralError("Error joining peerServer: "+err.type)
       resetPeerJsOptions()
       testPeer.close()
@@ -207,12 +216,11 @@ function createPeerServer(dir,port){
     let testPeer = new Peer(undefined,PEERJS_OPTIONS)
   testPeer.on('open', function(id) {
     console.log('My peer ID is: ' + id);
-    hide('peerServer')
-    show('start');
+
+    changeMode('start')
     });
     testPeer.on('error',function(err){
-      hide('start')
-      show('peerServer');
+      changeMode('peerServer')
       displayGeneralError("Error creating peerServer: "+err.type)
       resetPeerJsOptions()
       
@@ -246,7 +254,7 @@ function changeModeDM(){
 
 
 var currentChat = "";
-var mode='start'; 
+var mode='peerServer'; 
 //var messages=new Map();
 var nextmessageID=0;
 var myID;
@@ -274,10 +282,11 @@ class chatData{
     let chat = this;
     //Shared data.
     this.name=name;
-    this.pass=pass;
+
     this.myName=myName;
     //Data that is not always synced between users
     this.users=[];
+    this.pass=pass;
     this.logs=[];
     this.emotes=new Map;
     this.on=false;
@@ -296,6 +305,7 @@ class chatData{
 
     this.users.push(new user(0,this.myName,this.puKey,true));
     this.load();
+    this.pass=pass;
     this.normalCommunicator = new EventEmitter();
     this.conTree = new P2PTreeNodeTree(chat.myName);
 
@@ -1322,7 +1332,7 @@ class chatData{
             let message;
             
             if((uState === "unregistered" || !uState) ){
-              if( chat.pass===data.pass){
+              if( (chat.pass===data.pass)||(!data.pass&&chat.pass==="")){
                 console.log(from)
                 u=new user(1,chat.nameFromPeerID(from),importKey(data.puKey),true);
                 console.log(u)
@@ -1335,7 +1345,7 @@ class chatData{
 
             }
             if(uState === "offline"){
-              if(chat.pass===data.pass){
+              if((chat.pass===data.pass)||(!data.pass&&chat.pass==="")){
                 if(u.puKey!==data.puKey){
                   this.sendAllRoot({'command':"KEYCHG",'name':from,'puKey':data.puKey})
                 }
@@ -2350,7 +2360,7 @@ function setupUser(username,settings){
   });
   me.peer.on('open',function(){
     me.dmLogs=[]
-    document.getElementById("username").appendChild(document.createTextNode("Welcome, "+username));
+    document.getElementById("username").innerText="Welcome, "+username;
     document.getElementById('DMsButton').disabled = false;
     document.getElementById('plus').disabled = false;
     changeMode('chatCreation');
@@ -2360,7 +2370,7 @@ function setupUser(username,settings){
         fs.mkdirSync(folderName);
       }
     } catch (err) {
-      console.error(err);
+      console.log(err);
     }
     var folderName = path.join('.', 'UserData', username);
     try {
@@ -2369,7 +2379,7 @@ function setupUser(username,settings){
         var jsonPath = path.join('.', 'UserData', username, 'config.json');
         fs.writeFile(jsonPath, JSON.stringify(me.settings), err => {
           if (err) {
-            console.error(err);
+            console.log(err);
           } else {
             // file written successfully
           }
@@ -2378,7 +2388,7 @@ function setupUser(username,settings){
         loadSession(username)
       }
     } catch (err) {
-      console.error(err);
+      console.log(err);
     }
     
   });
@@ -2652,7 +2662,7 @@ function chatPrepareTab(id){
   changeMode('chat',id);
 }
 //Closes chat tab
-function chatClose(chatName){
+function chatClose(chatName,shouldSave=true){
   let button = document.getElementById("chatButton"+chatName);
   let button2 = document.getElementById("chatClose"+chatName);
   if(mode ==='chat' && currentChat===chatName){
@@ -2669,7 +2679,8 @@ function chatClose(chatName){
     try{
       chats.delete(chatName);
       chat.close();
-      saveSession(me.username)
+      if(shouldSave)
+        saveSession(me.username)
     }catch(e){console.log(e)}
     if(currentChat2===chatName){
       currentChat2=null;
